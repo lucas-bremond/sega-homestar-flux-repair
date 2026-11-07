@@ -27,7 +27,7 @@ The Homestar Flux (Sega Toys, 2018) is an optical home planetarium developed wit
 | `REPAIR_LOG.md`       | Investigation log, findings and next steps                                                           |
 | `docs/manual.pdf`     | Official manual (English and German), SporsPartners GmbH & Co. KG, 2018                              |
 | `docs/B07JB9Q3FW.pdf` | Third-party instruction page from Manuals+; unofficial, some specs conflict with the official manual |
-| `photos/`             | Photos of the board and mechanism, prefixed with the date taken                                      |
+| `photos/`             | Board photos (`top-*`, `bottom-*`) and part close-ups (`parts/`)                                     |
 
 ## Safety
 
