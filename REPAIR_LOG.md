@@ -31,6 +31,7 @@ Investigation log for the Homestar Flux fault described in the [README](README.m
 | 8   | 2026-11-07 | Inspect the shooting-star mechanism                   | It depends on the motor turning                                                        | Both buttons go through the motor path             |
 | 9   | 2026-11-07 | Disconnect `M+`, press Shooting Star                  | Still resets                                                                           | Motor ruled out; the fault is upstream of it       |
 | 10  | 2026-11-07 | Photograph part close-ups (`photos/parts/`)           | U4 is a Mixic MX08L motor driver, U2 a 3.3 V regulator, U1 unmarked; no visible damage | Motor driver identified; see [findings](#findings) |
+| 11  | 2026-11-07 | Run re:trace (automated analysis) on the photos       | No parts, markings or real traces found (sees paper and pads, not masked traces)       | [Not usable here](analysis/retrace/README.md)      |
 
 ## Findings
 
@@ -108,6 +109,9 @@ Main board marking: `E007-01GE047-02XP`, `REV:00`, `2018-07-05`.
 
 ## Open questions
 
+Automated photo analysis can't answer these (#11). The [connection checks](analysis/retrace/README.md#connection-checks) list the meter measurements that do.
+
 - What `R1B` connects to.
 - What Q2 drives.
+- What feeds U4's logic supply (pin 1, VCC): U2's 3.3 V or the 5 V input.
 - U3's exact part number (marked `9624`), only needed if the main lamp ever fails.
