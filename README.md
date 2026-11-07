@@ -29,6 +29,7 @@ The Homestar Flux (Sega Toys, 2018) is an optical home planetarium developed wit
 | `docs/B07JB9Q3FW.pdf` | Third-party instruction page from Manuals+; unofficial, some specs conflict with the official manual |
 | `photos/`             | Board photos (`top-*`, `bottom-*`) and part close-ups (`parts/`)                                     |
 | `analysis/retrace/`   | Evaluation of re:trace, an automated PCB photo analysis tool, on these photos (not usable here)      |
+| `analysis/yolo26/`    | Evaluation of a PCB-trained YOLO component detector on these photos                                  |
 
 ## Safety
 

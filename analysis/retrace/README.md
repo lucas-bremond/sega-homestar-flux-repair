@@ -84,7 +84,7 @@ Even the best case misreads `MX08L` as `MXOBL`. For U2 it reads only the date co
 
 ## Why it doesn't work here
 
-- **There are no PCB-trained detection weights.** The default `yolov8n.pt` is trained on everyday objects; a PCB-trained model needs to be supplied for detection to work at all. Its classes are mapped onto PCB labels by index (`detection/detector.py`), so "person", class 0, becomes "ic".
+- **There are no PCB-trained detection weights.** The default `yolov8n.pt` is trained on everyday objects; a PCB-trained model needs to be supplied for detection to work at all. A public PCB-trained model was tried separately; see [the PCB-trained YOLO analysis](../yolo26/README.md). Its classes are mapped onto PCB labels by index (`detection/detector.py`), so "person", class 0, becomes "ic".
 - **Trace extraction looks for bare copper.** It needs exposed copper, as on an unmasked or delayered board. Traces under solder mask, and any background in shot, defeat it. It also only finds connected blobs, not which pad connects to which.
 - **The part database is small** (128 parts, aimed at security work) and its fuzzy matcher accepts a 55 % string similarity. Markings it doesn't know therefore come back as a confident wrong part, not "unknown".
 - **The photos are hard for it:** taken by hand at an angle, with background and wires in shot. Better photos alone would not fix the three issues above.

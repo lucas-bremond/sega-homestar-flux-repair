@@ -32,6 +32,7 @@ Investigation log for the Homestar Flux fault described in the [README](README.m
 | 9   | 2026-11-07 | Disconnect `M+`, press Shooting Star                  | Still resets                                                                           | Motor ruled out; the fault is upstream of it       |
 | 10  | 2026-11-07 | Photograph part close-ups (`photos/parts/`)           | U4 is a Mixic MX08L motor driver, U2 a 3.3 V regulator, U1 unmarked; no visible damage | Motor driver identified; see [findings](#findings) |
 | 11  | 2026-11-07 | Run re:trace (automated analysis) on the photos       | No parts, markings or real traces found (sees paper and pads, not masked traces)       | [Not usable here](analysis/retrace/README.md)      |
+| 12  | 2026-11-07 | Run a PCB-trained YOLO model on the photos            | Finds 41 of 46 parts; ICs and SMD passives right, U4 called a diode on the board view  | [Nothing new](analysis/yolo26/README.md)           |
 
 ## Findings
 
@@ -109,7 +110,7 @@ Main board marking: `E007-01GE047-02XP`, `REV:00`, `2018-07-05`.
 
 ## Open questions
 
-Automated photo analysis can't answer these (#11). The [connection checks](analysis/retrace/README.md#connection-checks) list the meter measurements that do.
+Automated photo analysis can't answer these (#11, #12). The [connection checks](analysis/retrace/README.md#connection-checks) list the meter measurements that do.
 
 - What `R1B` connects to.
 - What Q2 drives.
