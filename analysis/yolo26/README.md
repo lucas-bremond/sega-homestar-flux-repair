@@ -9,10 +9,10 @@
 
 **Partly. It finds most parts and types ICs and SMD passives well, but mislabels most through-hole parts. It adds nothing new to the diagnosis.**
 
-- **Locating:** good. In the best view of each part it put a box on 41 of the 46 parts scored below. It missed 3 of the 8 LEDs and 2 of the 5 switches, and found nothing at all on U2's close-ups.
+- **Locating:** good. In the best view of each part it put a box on 41 of the 44 parts scored below. It missed 2 of the 7 LEDs and 1 of the 4 switches, and found nothing at all on U2's close-ups.
 - **Typing:**
   - Reliable for **ICs** and **SMD resistors and capacitors**. All four ICs were named correctly in at least one photo.
-  - Poor for this board's **through-hole parts**: 0 of 8 LEDs, 0 of 5 switches and 0 of 2 inductors got the right label.
+  - Poor for this board's **through-hole parts**: 0 of 7 LEDs, 0 of 4 switches and 0 of 2 inductors got the right label.
   - Diodes and transistors were mixed: 1 of 6 diodes and 1 of 2 transistors were labelled correctly.
 - **Errors that would mislead:**
   - **U4, the prime suspect, is labelled a diode** in the whole-board photo. It is named an IC only in its close-up.
@@ -57,12 +57,12 @@ Top left: `IMG_3619`, with U4 found as an IC. Top right: `IMG_3626`, with U1 an 
 | Q2 (`Y1`, SOT-23)                   | Yes     | No            | IC (`bottom-1`)                                                        |
 | D10, D11 (`M1`, SMA)                | 2 of 2  | 1 of 2        | Diode and other (`top-1`); missed in `IMG_3619`                        |
 | D12, D13, D15, D16 (glass and SK34) | 4 of 4  | 0 of 4        | Other ×3, capacitor (`bottom-1`); missed in `IMG_3629`                 |
-| LEDs D3–D9 and ON (8)               | 5 of 8  | 0 of 8        | Capacitor, connector, other, inductor or `?`                           |
-| Electrolytics C2, C3, C7, C10       | 4 of 4  | 2 of 4        | C3 and C2 electrolytic; C10 capacitor; C7 (47 µF beside U4) **switch** |
+| LEDs D3–D9 (7)                      | 5 of 7  | 0 of 7        | Capacitor, connector, other, inductor or `?`                           |
+| Electrolytics C2, C3, C7, C11       | 4 of 4  | 2 of 4        | C3 and C2 electrolytic; C11 capacitor; C7 (47 µF beside U4) **switch** |
 | Inductors (`QC06`, `102`)           | 2 of 2  | 0 of 2        | Electrolytic; connector                                                |
-| Buttons SW1–SW4 and slide switch S1 | 3 of 5  | 0 of 5        | `?`                                                                    |
+| Buttons SW1–SW3 and slide switch S1 | 3 of 4  | 0 of 4        | `?`                                                                    |
 | SMD resistors checked (15)          | 15      | 15            | Resistor. Top: R3–R10, R12, R13, R17. Bottom: R16, `R1B`, 2 × `R390`   |
-| **Total (46 parts)**                | **41**  | **23**        |                                                                        |
+| **Total (44 parts)**                | **41**  | **23**        |                                                                        |
 
 The resistor row covers the 15 resistors I could read on the silkscreen. Small ceramic capacitors were also labelled "capacitor" in nearly every case, but they aren't counted in the total.
 
@@ -88,6 +88,8 @@ On `top-1.jpg`:
 The U2 close-ups (`IMG_3629`, `IMG_3630`) were also tried at scales 0.1, 0.25 and 0.35. U2 was never located.
 
 ![top-1 at full scale, for comparison](images/top-1-types-full-scale.jpg)
+
+_Corrected on 2026-11-07, after closer tracing for the [board model](../pcb-model/README.md): the board has 7 LEDs and 3 push-buttons (not 8 and 4), and the electrolytic by the `102` inductor is C11 (not C10)._
 
 ## Why it falls short here
 

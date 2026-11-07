@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ — partial model</title>
+<style>
+  :root { --bg:#f8fafc; --panel:#fff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --accent:#0f766e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--ink); background:var(--bg); }
+  header { padding:12px 20px; background:#0f172a; color:#f8fafc; display:flex; flex-wrap:wrap; gap:8px 24px; align-items:center; }
+  header h1 { font-size:17px; margin:0; font-weight:600; }
+  header .sub { color:#cbd5e1; font-size:12.5px; }
+  .legend { display:flex; gap:10px; flex-wrap:wrap; margin-left:auto; }
+  .legend label { display:flex; align-items:center; gap:5px; font-size:12.5px; cursor:pointer; color:#e2e8f0; }
+  .chip { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11.5px; color:#fff; white-space:nowrap; }
+  nav { display:flex; gap:2px; padding:0 20px; background:#1e293b; }
+  nav button { background:none; border:0; color:#cbd5e1; padding:10px 14px; font:inherit; cursor:pointer; border-bottom:3px solid transparent; }
+  nav button.active { color:#fff; border-bottom-color:#2dd4bf; }
+  main { display:none; padding:14px 20px 40px; }
+  main.active { display:block; }
+  .board { display:grid; grid-template-columns: 250px 1fr 340px; gap:14px; align-items:start; }
+  .side, .detail { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; position:sticky; top:10px; max-height:calc(100vh - 20px); overflow:auto; }
+  .side h3, .detail h3 { margin:6px 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  .side input[type=search] { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+  .list { list-style:none; margin:0 0 10px; padding:0; }
+  .list li { padding:4px 6px; border-radius:5px; cursor:pointer; display:flex; justify-content:space-between; gap:6px; align-items:center; }
+  .list li:hover { background:#f1f5f9; }
+  .list li.sel { background:#ccfbf1; }
+  .list li .n { color:var(--muted); font-size:12px; }
+  .photos { display:flex; flex-direction:column; gap:14px; min-width:0; }
+  .photo { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px; }
+  .photo h2 { font-size:14px; margin:2px 4px 8px; display:flex; justify-content:space-between; }
+  .photo h2 span { color:var(--muted); font-weight:400; font-size:12px; }
+  .stage { position:relative; width:100%; }
+  .stage img { width:100%; display:block; border-radius:4px; }
+  .stage svg { position:absolute; inset:0; width:100%; height:100%; }
+  .box { fill:transparent; stroke:#94a3b8; stroke-width:2; cursor:pointer; vector-effect:non-scaling-stroke; }
+  .box.unknown { stroke-dasharray:5 4; }
+  .box:hover { fill:rgba(45,212,191,.18); }
+  .dim .box { opacity:.25; }
+  .dim .box.hit { opacity:1; stroke-width:3.5; fill:rgba(255,255,255,.15); }
+  .tag { font:600 13px system-ui; fill:#fff; paint-order:stroke; stroke:#000; stroke-width:3px; pointer-events:none; display:none; }
+  .dim .tag.hit, .showtags .tag { display:block; }
+  .detail table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .detail td, .detail th { border-bottom:1px solid var(--line); padding:4px 4px; text-align:left; vertical-align:top; }
+  .detail .ev { color:var(--muted); font-size:12px; }
+  .detail a, .q a { color:var(--accent); cursor:pointer; text-decoration:underline; }
+  .detail .note { background:#fefce8; border:1px solid #fde68a; padding:6px 8px; border-radius:6px; font-size:12.5px; margin:6px 0; }
+  .muted { color:var(--muted); }
+  .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
+  .toolbar button { font:inherit; padding:4px 10px; border:1px solid var(--line); background:#fff; border-radius:6px; cursor:pointer; }
+  .diagram, .schem { background:#fff; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; }
+  .diagram svg { width:100%; max-width:1300px; height:auto; display:block; margin:auto; }
+  .diagram .block { cursor:pointer; }
+  .diagram .block:hover rect { stroke-width:3; }
+  .schem { height:calc(100vh - 170px); }
+  .schem svg { width:calc(var(--z, 1) * 100%); height:auto; background:#fff; }
+  .qs { display:grid; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); gap:12px; }
+  .q { background:#fff; border:1px solid var(--line); border-left:4px solid #dc2626; border-radius:8px; padding:10px 12px; }
+  .q h4 { margin:0 0 6px; font-size:14px; }
+  .q p { margin:4px 0; }
+  .q .check { background:#f0fdfa; padding:6px 8px; border-radius:6px; }
+  footer { color:var(--muted); font-size:12px; padding:0 20px 20px; }
+  @media (max-width: 1100px) { .board { grid-template-columns: 1fr; } .side, .detail { position:static; max-height:none; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>__TITLE__ — partial electrical model</h1>
+    <div class="sub" id="sub"></div>
+  </div>
+  <div class="legend" id="legend" title="Show connections at these confidence levels"></div>
+</header>
+<nav>
+  <button data-tab="board" class="active">Board</button>
+  <button data-tab="diagram">Block diagram</button>
+  <button data-tab="schematic">Schematic</button>
+  <button data-tab="questions">Open questions</button>
+</nav>
+
+<main id="tab-board" class="active">
+  <div class="board">
+    <aside class="side">
+      <input type="search" id="search" placeholder="Filter nets and parts…" aria-label="Filter nets and parts">
+      <h3>Nets</h3>
+      <ul class="list" id="nets"></ul>
+      <h3>Parts</h3>
+      <ul class="list" id="parts"></ul>
+    </aside>
+    <div class="photos">
+      <div class="toolbar">
+        <label><input type="checkbox" id="tags"> Show all part labels</label>
+        <button id="clear">Clear selection</button>
+        <span class="muted">Click a box or a list item. Dashed boxes: no known connections.</span>
+      </div>
+      <section class="photo"><h2>Top side <span id="cap-top"></span></h2><div class="stage" id="stage-top"><img alt="Board top side" src="__TOP_URI__"></div></section>
+      <section class="photo"><h2>Bottom side <span id="cap-bottom"></span></h2><div class="stage" id="stage-bottom"><img alt="Board bottom side" src="__BOTTOM_URI__"></div></section>
+    </div>
+    <aside class="detail" id="detail"></aside>
+  </div>
+</main>
+
+<main id="tab-diagram">
+  <p class="muted">Solid links: confirmed or traced in a photo. Dashed: datasheet or assumed. Click a block to see its parts on the board.</p>
+  <div class="diagram">__DIAGRAM__</div>
+</main>
+
+<main id="tab-schematic">
+  <div class="toolbar">
+    <button data-z="-1">−</button><button data-z="1">+</button><button data-z="0">Fit</button>
+    <span class="muted">Exported from pcb-model.kicad_sch with kicad-cli. Label colour = confidence. Pins without a label are unknown.</span>
+  </div>
+  <div class="schem" id="schem">__SCHEMATIC__</div>
+</main>
+
+<main id="tab-questions">
+  <p class="muted">Each open question names the pins involved and the measurement that settles it. Record results in model.yaml as <code>measured</code>.</p>
+  <div class="qs" id="qs"></div>
+</main>
+
+<footer id="foot"></footer>
+
+<script id="model" type="application/json">__DATA__</script>
+<script>
+(() => {
+  const M = JSON.parse(document.getElementById('model').textContent);
+  const C = M.confidence;
+  const rank = k => C[k].rank;
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const chip = k => `<span class="chip" style="background:${C[k].color}">${k}</span>`;
+  const enabled = new Set(Object.keys(C));
+
+  // pin -> {net, conf, evidence}
+  const pinNet = {};
+  for (const [name, net] of Object.entries(M.nets))
+    for (const n of net.nodes) pinNet[`${n.ref}.${n.pin}`] = {net: name, conf: n.conf, evidence: n.evidence};
+  const partKnown = ref => Object.keys(M.parts[ref].pins).some(p => pinNet[`${ref}.${p}`]);
+
+  $('#sub').textContent = `${M.board.marking} · model of ${M.board.model_date} · ` +
+    `${Object.keys(M.parts).length} parts, ${Object.keys(M.nets).length} nets, ${M.questions.length} open questions`;
+  $('#foot').textContent = 'Generated by analysis/pcb-model/build.py from model.yaml. ' +
+    'Photo-derived connections are hypotheses until measured.';
+
+  // legend / filters
+  for (const [k, v] of Object.entries(C).sort((a, b) => b[1].rank - a[1].rank)) {
+    const l = document.createElement('label');
+    l.title = v.meaning;
+    l.innerHTML = `<input type="checkbox" checked data-c="${k}">${chip(k)}`;
+    $('#legend').append(l);
+  }
+  $('#legend').addEventListener('change', e => {
+    const k = e.target.dataset.c; e.target.checked ? enabled.add(k) : enabled.delete(k);
+    renderLists(); reselect();
+  });
+
+  // photo overlays
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const boxes = {};
+  for (const [side, ph] of Object.entries(M.photos)) {
+    $(`#cap-${side}`).textContent = ph.file;
+    const svg = document.createElementNS(SVGNS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${ph.w} ${ph.h}`);
+    for (const [ref, part] of Object.entries(M.parts)) {
+      const b = part.box && part.box[side]; if (!b) continue;
+      const [x0, y0, x1, y1] = b.map(v => v * ph.scale);
+      const r = document.createElementNS(SVGNS, 'rect');
+      Object.entries({x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 3}).forEach(([a, v]) => r.setAttribute(a, v));
+      r.classList.add('box'); if (!partKnown(ref)) r.classList.add('unknown');
+      r.dataset.ref = ref;
+      const t = document.createElementNS(SVGNS, 'title'); t.textContent = `${ref} — ${part.value}`; r.append(t);
+      r.addEventListener('click', () => selectPart(ref));
+      const tag = document.createElementNS(SVGNS, 'text');
+      tag.setAttribute('x', x0 + 2); tag.setAttribute('y', Math.max(14, y0 - 4));
+      tag.classList.add('tag'); tag.dataset.ref = ref; tag.textContent = ref.replace(/^J_/, '');
+      svg.append(r, tag);
+      (boxes[ref] ||= []).push(r, tag);
+    }
+    $(`#stage-${side}`).append(svg);
+  }
+  $('#tags').addEventListener('change', e => document.querySelectorAll('.stage').forEach(s => s.classList.toggle('showtags', e.target.checked)));
+
+  // lists
+  let current = null;
+  function renderLists() {
+    const f = $('#search').value.trim().toLowerCase();
+    const nets = $('#nets'); nets.innerHTML = '';
+    for (const [name, net] of Object.entries(M.nets)) {
+      const vis = net.nodes.filter(n => enabled.has(n.conf));
+      if (!vis.length) continue;
+      const hay = (name + ' ' + net.description + ' ' + net.nodes.map(n => n.ref).join(' ')).toLowerCase();
+      if (f && !hay.includes(f)) continue;
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${esc(name)}</span><span class="n">${vis.length} ${chip(M.netConfidence[name])}</span>`;
+      li.dataset.net = name; li.onclick = () => selectNet(name);
+      if (current && current.net === name) li.classList.add('sel');
+      nets.append(li);
+    }
+    const parts = $('#parts'); parts.innerHTML = '';
+    const nat = (a, b) => a.localeCompare(b, undefined, {numeric: true});
+    for (const ref of Object.keys(M.parts).sort(nat)) {
+      const p = M.parts[ref];
+      const hay = (ref + ' ' + p.value + ' ' + (p.label || '')).toLowerCase();
+      if (f && !hay.includes(f)) continue;
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${esc(p.label || ref)}</span><span class="n">${esc(p.value).slice(0, 26)}</span>`;
+      li.onclick = () => selectPart(ref);
+      if (current && current.ref === ref) li.classList.add('sel');
+      parts.append(li);
+    }
+  }
+  $('#search').addEventListener('input', renderLists);
+
+  function highlight(refColors) {
+    document.querySelectorAll('.stage svg').forEach(s => s.classList.toggle('dim', !!refColors));
+    document.querySelectorAll('.box, .tag').forEach(el => { el.classList.remove('hit'); if (el.tagName === 'rect') el.style.stroke = ''; });
+    if (!refColors) return;
+    for (const [ref, color] of Object.entries(refColors))
+      for (const el of boxes[ref] || []) { el.classList.add('hit'); if (el.tagName === 'rect') el.style.stroke = color; }
+  }
+
+  function questionsFor(pred) {
+    return M.questions.filter(q => q.pins.some(([r, p]) => pred(r, String(p))));
+  }
+  function qList(qs) {
+    if (!qs.length) return '';
+    return `<h3>Open questions</h3>` + qs.map(q => `<p><b>${q.id}</b> ${esc(q.title)}<br><span class="ev">Check: ${esc(q.check)}</span></p>`).join('');
+  }
+
+  function selectNet(name) {
+    current = {net: name};
+    const net = M.nets[name];
+    const vis = net.nodes.filter(n => enabled.has(n.conf));
+    const colors = {};
+    for (const n of vis) if (!colors[n.ref] || rank(n.conf) < rank(colors[n.ref].c)) colors[n.ref] = {c: n.conf};
+    highlight(Object.fromEntries(Object.entries(colors).map(([r, v]) => [r, C[v.c].color])));
+    const rows = vis.map(n => {
+      const p = M.parts[n.ref];
+      return `<tr><td><a data-ref="${n.ref}">${esc(p.label || n.ref)}</a>.${esc(n.pin)}<br><span class="ev">${esc(p.pins[n.pin])}</span></td>` +
+        `<td>${chip(n.conf)}<div class="ev">${esc(n.evidence)}</div></td></tr>`;
+    }).join('');
+    const hidden = net.nodes.length - vis.length;
+    $('#detail').innerHTML = `<h3>Net</h3><h2 style="margin:0 0 4px">${esc(name)}</h2>` +
+      `<p>${esc(net.description)}</p><p>Weakest link: ${chip(M.netConfidence[name])}</p>` +
+      `<table><tr><th>Pin</th><th>Confidence and evidence</th></tr>${rows}</table>` +
+      (hidden ? `<p class="muted">${hidden} connection(s) hidden by the confidence filter.</p>` : '') +
+      qList(questionsFor((r, p) => net.nodes.some(n => n.ref === r && n.pin === p)));
+    wireLinks(); renderLists();
+  }
+
+  function selectPart(ref) {
+    current = {ref};
+    const p = M.parts[ref];
+    const colors = {[ref]: '#0f766e'};
+    const rows = Object.entries(p.pins).map(([num, name]) => {
+      const pn = pinNet[`${ref}.${num}`];
+      if (pn && enabled.has(pn.conf)) {
+        for (const n of M.nets[pn.net].nodes) if (n.ref !== ref && enabled.has(n.conf)) colors[n.ref] ||= '#f59e0b';
+        return `<tr><td>${esc(num)}</td><td>${esc(name)}</td><td><a data-net="${esc(pn.net)}">${esc(pn.net)}</a> ${chip(pn.conf)}</td></tr>`;
+      }
+      return `<tr><td>${esc(num)}</td><td>${esc(name)}</td><td class="muted">${pn ? 'hidden by filter' : 'unknown'}</td></tr>`;
+    }).join('');
+    highlight(colors);
+    $('#detail').innerHTML = `<h3>Part</h3><h2 style="margin:0 0 4px">${esc(p.label || ref)}</h2>` +
+      `<p><b>${esc(p.value)}</b>${p.package ? ' · ' + esc(p.package) : ''}<br><span class="muted">Block: ${esc(M.blocks[p.group].title)}` +
+      `${p.label ? ' · ref ' + esc(ref) : ''}</span></p>` +
+      (p.note ? `<div class="note">${esc(p.note)}</div>` : '') +
+      (p.pinout_source ? `<p class="ev">Pinout: ${esc(p.pinout_source)}</p>` : '') +
+      `<table><tr><th>Pin</th><th>Name</th><th>Net</th></tr>${rows}</table>` +
+      `<p class="ev">Teal: this part. Amber: parts sharing a net with it.</p>` +
+      qList(questionsFor(r => r === ref));
+    wireLinks(); renderLists();
+  }
+
+  function wireLinks() {
+    $('#detail').querySelectorAll('a[data-net]').forEach(a => a.onclick = () => selectNet(a.dataset.net));
+    $('#detail').querySelectorAll('a[data-ref]').forEach(a => a.onclick = () => selectPart(a.dataset.ref));
+  }
+  function reselect() { if (!current) return; current.net ? selectNet(current.net) : selectPart(current.ref); }
+  function clear() {
+    current = null; highlight(null); renderLists();
+    $('#detail').innerHTML = '<h3>Details</h3><p class="muted">Select a net or a part.</p>' +
+      '<h3>Confidence levels</h3>' + Object.entries(C).sort((a, b) => b[1].rank - a[1].rank)
+        .map(([k, v]) => `<p>${chip(k)} ${esc(v.meaning)}</p>`).join('') +
+      '<p class="muted">Pins that are not on any net are <b>unknown</b>, not unconnected.</p>';
+  }
+  $('#clear').onclick = clear;
+
+  // tabs
+  document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  function showTab(t) {
+    document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === t));
+    document.querySelectorAll('main').forEach(x => x.classList.toggle('active', x.id === 'tab-' + t));
+  }
+
+  // block diagram: click -> show block's parts on the board
+  document.querySelectorAll('.diagram .block').forEach(g => g.addEventListener('click', () => {
+    const key = g.dataset.block;
+    const refs = Object.keys(M.parts).filter(r => M.parts[r].group === key);
+    showTab('board'); current = null; renderLists();
+    highlight(Object.fromEntries(refs.map(r => [r, '#0f766e'])));
+    $('#detail').innerHTML = `<h3>Block</h3><h2 style="margin:0 0 4px">${esc(M.blocks[key].title)}</h2>` +
+      `<ul>${refs.map(r => `<li><a data-ref="${r}">${esc(M.parts[r].label || r)}</a> — ${esc(M.parts[r].value)}</li>`).join('')}</ul>`;
+    wireLinks();
+  }));
+
+  // schematic zoom
+  let z = 1;
+  document.querySelectorAll('[data-z]').forEach(b => b.onclick = () => {
+    const d = +b.dataset.z; z = d === 0 ? 1 : Math.min(6, Math.max(1, z * (d > 0 ? 1.4 : 1 / 1.4)));
+    $('#schem').style.setProperty('--z', z);
+  });
+
+  // open questions
+  $('#qs').innerHTML = M.questions.map(q => `<div class="q"><h4>${q.id} · ${esc(q.title)}</h4>` +
+    `<p>Pins: ${q.pins.map(([r, p]) => `<a data-ref="${r}">${esc(M.parts[r].label || r)}.${p}</a>`).join(', ')}</p>` +
+    `<p class="muted">Candidates: ${q.candidates.map(esc).join(', ')}</p>` +
+    `<p class="check"><b>Check:</b> ${esc(q.check)}</p><p class="muted">${esc(q.why)}</p></div>`).join('');
+  $('#qs').querySelectorAll('a[data-ref]').forEach(a => a.onclick = () => { showTab('board'); selectPart(a.dataset.ref); });
+
+  renderLists(); clear();
+})();
+</script>
+</body>
+</html>

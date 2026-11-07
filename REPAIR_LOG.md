@@ -32,7 +32,8 @@ Investigation log for the Homestar Flux fault described in the [README](README.m
 | 9   | 2026-11-07 | Disconnect `M+`, press Shooting Star                  | Still resets                                                                           | Motor ruled out; the fault is upstream of it       |
 | 10  | 2026-11-07 | Photograph part close-ups (`photos/parts/`)           | U4 is a Mixic MX08L motor driver, U2 a 3.3 V regulator, U1 unmarked; no visible damage | Motor driver identified; see [findings](#findings) |
 | 11  | 2026-11-07 | Run re:trace (automated analysis) on the photos       | No parts, markings or real traces found (sees paper and pads, not masked traces)       | [Not usable here](analysis/retrace/README.md)      |
-| 12  | 2026-11-07 | Run a PCB-trained YOLO model on the photos            | Finds 41 of 46 parts; ICs and SMD passives right, U4 called a diode on the board view  | [Nothing new](analysis/yolo26/README.md)           |
+| 12  | 2026-11-07 | Run a PCB-trained YOLO model on the photos            | Finds 41 of 44 parts; ICs and SMD passives right, U4 called a diode on the board view  | [Nothing new](analysis/yolo26/README.md)           |
+| 13  | 2026-11-07 | Build a partial board model from the photos           | 45 of 133 pins on a net, mostly assumed; netlist, KiCad schematic and HTML viewer      | [Board model](analysis/pcb-model/README.md)        |
 
 ## Findings
 
@@ -84,12 +85,12 @@ Main board marking: `E007-01GE047-02XP`, `REV:00`, `2018-07-05`.
 | `5WL+` / `5WL-` | Main 5 W LED                         |
 | `SSL+` / `SSL-` | Shooting-star LED                    |
 | `M+` / `M-`     | Rotation motor (brushed DC, 2 wires) |
-| `R1B`           | Unknown, next to `DC+`               |
+| `R1B`           | Yellow wire; 100 Ω (`R1B`) to `DC+`  |
 
 - **Power switch:** hard ON/OFF slide switch.
 - **Microcontroller:** U1, an unmarked 18-pin chip in the middle of the top side.
 - **Motor driver:** U4, Mixic MX08L (marked `MX08L 1949H`), next to `M+` on the top side, with a 47 µF 16 V electrolytic beside it. Pinout: 1 VCC (logic supply), 2 INA, 3 INB, 4 VDD (motor supply), 5 OUTB, 6 and 7 GND, 8 OUTA. Both inputs low: outputs off; one high: forward or reverse; both high: brake. Datasheet: [LCSC C5119041](https://lcsc.com/product-detail/Brushed-DC-Motor-Drivers_Mixic-MX08L_C5119041.html).
-- **Main LED driver:** U3, 8-pin, bottom side, marked `9624`, with an SK34 Schottky diode (D16) and two `R390` (0.39 Ω) current-sense resistors. Works.
+- **Main LED driver:** U3, 8-pin, bottom side, marked `D9924 2006` (likely a QX9924 step-down LED driver; read from `parts/IMG_3631`), with an SK34 Schottky diode (D16) and two `R390` (0.39 Ω) current-sense resistors. Works.
 - **3.3 V regulator:** U2, marked `6206A` / `33`, bottom side, near the motor and shooting-star pads.
 - **Transistors:** Q1 (top side, by the shooting-star pads, with a 68 Ω resistor R3, likely the shooting-star LED driver) and Q2 (bottom side, by R16). Both are SOT-23 parts marked `Y1`, commonly an SS8050 NPN.
 - **Other parts near the motor and shooting-star pads (bottom side):** glass diodes D12, D13 and D15, capacitors C1, C5, C8 and C13.
@@ -110,9 +111,9 @@ Main board marking: `E007-01GE047-02XP`, `REV:00`, `2018-07-05`.
 
 ## Open questions
 
-Automated photo analysis can't answer these (#11, #12). The [connection checks](analysis/retrace/README.md#connection-checks) list the meter measurements that do.
+Automated photo analysis can't answer these (#11, #12). The [board model](analysis/pcb-model/README.md) (#13) tracks them, and five more, as open questions with the meter check for each.
 
-- What `R1B` connects to.
+- What the yellow wire on `R1B` carries (it feeds `DC+` through 100 Ω).
 - What Q2 drives.
 - What feeds U4's logic supply (pin 1, VCC): U2's 3.3 V or the 5 V input.
-- U3's exact part number (marked `9624`), only needed if the main lamp ever fails.
+- U3's exact part number and pinout (marked `D9924`, likely QX9924), only needed if the main lamp ever fails.
