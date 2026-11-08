@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
 TEXTURE_PX_PER_MM = 12
 TALL_KINDS = {"led", "switch", "electrolytic"}
@@ -57,8 +57,9 @@ class Geometry:
         p = self.h_top @ [x, y, 1.0]
         return (p[0] / p[2], p[1] / p[2])
 
-    def texture(self, side: str, photo: str) -> str:
-        """The photo warped into the board frame, as a JPEG data URI."""
+    def texture(self, side: str, photo: str, enhanced: bool = False) -> str:
+        """The photo warped into the board frame, as a JPEG data URI; `enhanced` boosts local
+        contrast so copper under the solder mask shows (the same pixels, nothing added)."""
         r = TEXTURE_PX_PER_MM
         size = (math.ceil(self.width * r), math.ceil(self.height * r))
         if side == "top":
@@ -70,9 +71,17 @@ class Geometry:
         inv /= inv[2, 2]
         img = ImageOps.exif_transpose(Image.open(self.repo / photo)).convert("RGB")
         warped = img.transform(size, Image.PERSPECTIVE, tuple(inv.flatten()[:8]), Image.BICUBIC)
+        if enhanced:
+            warped = ImageOps.autocontrast(warped, cutoff=1)
+            warped = warped.filter(ImageFilter.UnsharpMask(radius=10, percent=260, threshold=0))
+            warped = ImageEnhance.Color(warped).enhance(1.5)
         buf = io.BytesIO()
         warped.save(buf, format="JPEG", quality=80)
         return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    def trace(self, side: str, points: list) -> list:
+        to_board = self.from_top if side == "top" else self.from_bottom
+        return [[round(c, 2) for c in to_board(x, y)] for x, y in points]
 
     def footprint(self, ref: str, part: dict, override: dict) -> dict | None:
         """Board-frame placement of a part's 3D body, or None if it has no box."""
@@ -164,9 +173,14 @@ def write_board_3d(model: dict, data: dict, here: Path, repo: Path, path: Path) 
             "max_residual_mm": round(max(geo.residuals.values()), 2),
         },
         "parts3d": parts3d,
+        "traces": [
+            {"net": t["net"], "side": t["side"], "evidence": t["evidence"], "points": geo.trace(t["side"], t["points"])}
+            for t in model.get("traces", [])
+        ],
         "textures": {
-            "top": geo.texture("top", model["photos"]["top"]["file"]),
-            "bottom": geo.texture("bottom", model["photos"]["bottom"]["file"]),
+            f"{side}{suffix}": geo.texture(side, model["photos"][side]["file"], enhanced=bool(suffix))
+            for side in ("top", "bottom")
+            for suffix in ("", "_enhanced")
         },
     }
     vendor = here / "vendor" / "three-0.170.0"

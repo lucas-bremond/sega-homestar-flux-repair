@@ -62,6 +62,23 @@ await page.evaluate(() => [...document.querySelectorAll('#nets li')].find(l => l
 await new Promise(r => setTimeout(r, 800));
 await page.screenshot({ path: 'shots/3d-xray-gnd.png' });
 
+// traced copper: M+ selection lights only M+ traces; toggles work
+await page.evaluate(() => { document.querySelector('#xray').click(); document.querySelector('#clear').click(); });
+await page.evaluate(() => [...document.querySelectorAll('#nets li')].find(l => l.dataset.net === 'M+').click());
+const lit3 = await page.evaluate(() => [...new Set(window.__traces())]);
+check('M+ lights only its traced copper', lit3.length === 1 && lit3[0] === 'M+', lit3.join(','));
+const tracedText = await page.evaluate(() => document.querySelector('#detail').innerText);
+check('net detail lists its traced copper', tracedText.toLowerCase().includes('traced copper') && tracedText.includes('IMG_3619'));
+await page.evaluate(() => window.__look([-25, -40, 45], [-28, -14, 0]));
+await new Promise(r => setTimeout(r, 800));
+await page.screenshot({ path: 'shots/3d-traces-motor.png' });
+await page.evaluate(() => { document.querySelector('#traces').click(); });
+const hidden = await page.evaluate(() => document.querySelector('#traces').checked === false);
+await page.evaluate(() => { document.querySelector('#traces').click(); document.querySelector('#clear').click(); document.querySelector('#enhanced').click(); document.querySelector('[data-view="bottom"]').click(); });
+await new Promise(r => setTimeout(r, 1200));
+await page.screenshot({ path: 'shots/3d-enhanced-bottom.png' });
+check('trace and enhanced toggles', hidden);
+
 check('no JS errors', errors.length === 0, errors.join(' | '));
 console.log(results.join('\n'));
 await browser.close();

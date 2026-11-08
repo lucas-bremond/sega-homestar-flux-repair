@@ -64,6 +64,8 @@
   <div class="stage" id="stage">
     <div class="toolbar">
       <button data-view="iso">3D</button><button data-view="top">Top</button><button data-view="bottom">Bottom</button>
+      <label title="Copper followed in the close-up photos (the evidence for the wired connections)"><input type="checkbox" id="traces" checked> Traced copper</label>
+      <label title="Contrast-boosted photos: copper under the solder mask shows as outlines"><input type="checkbox" id="enhanced"> Enhanced photo</label>
       <label><input type="checkbox" id="xray"> X-ray board</label>
       <label><input type="checkbox" id="alllabels"> All labels</label>
       <button id="clear">Clear</button>
@@ -119,6 +121,7 @@ ext.translate(0, 0, -T / 2);
 const board = new THREE.Mesh(ext, [new THREE.MeshBasicMaterial({visible: false}), sideMat]);
 scene.add(board); boardMats.push(sideMat);
 const loader = new THREE.TextureLoader();
+const faceMats = {};
 function face(uri, z, side) {
   const g = new THREE.ShapeGeometry(shape, 64);
   const pos = g.attributes.position, uv = new Float32Array(pos.count * 2);
@@ -126,11 +129,45 @@ function face(uri, z, side) {
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   const tex = loader.load(uri); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
   const m = new THREE.MeshStandardMaterial({map: tex, roughness: .85, side});
-  boardMats.push(m);
+  boardMats.push(m); faceMats[z > 0 ? 'top' : 'bottom'] = m;
   const mesh = new THREE.Mesh(g, m); mesh.position.z = z; scene.add(mesh); return mesh;
 }
 face(M.textures.top, T / 2 + 0.01, THREE.FrontSide);
 face(M.textures.bottom, -T / 2 - 0.01, THREE.BackSide);
+const texCache = {};
+function setEnhanced(on) {
+  for (const side of ['top', 'bottom']) {
+    const key = side + (on ? '_enhanced' : '');
+    if (!texCache[key]) { const t = loader.load(M.textures[key]); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); texCache[key] = t; }
+    faceMats[side].map = texCache[key]; faceMats[side].needsUpdate = true;
+  }
+}
+texCache.top = faceMats.top.map; texCache.bottom = faceMats.bottom.map;
+
+// ---------------------------------------------------------------- traced copper
+const traceGroup = new THREE.Group(); scene.add(traceGroup);
+const traceMeshes = [];
+for (const t of M.traces) {
+  const s = t.side === 'top' ? 1 : -1, z = s * (T / 2 + 0.06);
+  const pts = t.points.map(([x, y]) => P(x, y));
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i], b = pts[i + 1], len = a.distanceTo(b);
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(len, 0.9, 0.12), new THREE.MeshStandardMaterial({color: 0xc8823c, metalness: .6, roughness: .35, emissive: 0x7c3d12, emissiveIntensity: .35}));
+    seg.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, z); seg.rotation.z = Math.atan2(b.y - a.y, b.x - a.x);
+    seg.userData = {net: t.net, evidence: t.evidence}; traceGroup.add(seg); traceMeshes.push(seg);
+  }
+  for (const p of pts) {
+    const dot = new THREE.Mesh(new THREE.CylinderGeometry(.45, .45, .12, 16), new THREE.MeshStandardMaterial({color: 0xc8823c, metalness: .6, roughness: .35}));
+    dot.rotation.x = Math.PI / 2; dot.position.set(p.x, p.y, z); dot.userData = {net: t.net, evidence: t.evidence}; traceGroup.add(dot); traceMeshes.push(dot);
+  }
+}
+function lightTraces(net) {
+  for (const m of traceMeshes) {
+    const on = !net || m.userData.net === net;
+    m.material.transparent = !on; m.material.opacity = on ? 1 : .2;
+    if (m.material.emissive) { m.material.emissive.setHex(net && on ? 0xf59e0b : 0x7c3d12); m.material.emissiveIntensity = net && on ? .9 : .35; }
+  }
+}
 
 // ---------------------------------------------------------------- parts
 const groups = {}, anchors = {};
@@ -199,6 +236,11 @@ renderer.domElement.addEventListener('pointerup', e => {
 });
 renderer.domElement.addEventListener('pointermove', e => {
   const ref = pick(e), tip = $('#tip');
+  if (!ref && traceGroup.visible) {
+    const hit = ray.intersectObjects(traceMeshes, false)[0];
+    if (hit) { const r = stage.getBoundingClientRect(); tip.style.display = 'block'; tip.style.left = (e.clientX - r.left + 12) + 'px'; tip.style.top = (e.clientY - r.top + 12) + 'px';
+      tip.textContent = `${hit.object.userData.net} — traced: ${hit.object.userData.evidence}`; return; }
+  }
   if (!ref) { tip.style.display = 'none'; renderer.domElement.style.cursor = ''; return; }
   const r = stage.getBoundingClientRect(), p = M.parts[ref];
   tip.style.display = 'block'; tip.style.left = (e.clientX - r.left + 12) + 'px'; tip.style.top = (e.clientY - r.top + 12) + 'px';
@@ -266,14 +308,17 @@ function selectNet(name) {
   const net = M.nets[name], vis = net.nodes.filter(n => enabled.has(n.conf));
   const colors = {}; for (const n of vis) if (!colors[n.ref] || rank(n.conf) < rank(colors[n.ref])) colors[n.ref] = n.conf;
   highlight(Object.fromEntries(Object.entries(colors).map(([r, c]) => [r, C[c].color])), spanningEdges(vis));
+  lightTraces(name);
+  const traced = M.traces.filter(t => t.net === name);
   $('#detail').innerHTML = `<h3>Net</h3><h2 style="margin:0 0 4px">${esc(name)}</h2><p>${esc(net.description)}</p>` +
     `<p>Weakest link: ${chip(M.netConfidence[name])}</p><table><tr><th>Pin</th><th>Confidence and evidence</th></tr>` +
     vis.map(n => `<tr><td><a data-ref="${n.ref}">${esc(M.parts[n.ref].label || n.ref)}</a>.${esc(n.pin)}<br><span class="ev">${esc(M.parts[n.ref].pins[n.pin])}</span></td><td>${chip(n.conf)}<div class="ev">${esc(n.evidence)}</div></td></tr>`).join('') +
-    `</table><p class="ev">Lines join the parts on this net in the model (shortest tree, coloured by the weaker end), not the copper route.</p>`;
+    `</table><p class="ev">Lines join the parts on this net in the model (shortest tree, coloured by the weaker end), not the copper route.</p>` +
+    (traced.length ? `<h3>Traced copper</h3>` + traced.map(t => `<p class="ev">${t.side} side: ${esc(t.evidence)}</p>`).join('') : '<p class="ev">No copper traced for this net yet.</p>');
   wire(); renderLists();
 }
 function selectPart(ref) {
-  current = {ref};
+  current = {ref}; lightTraces(null);
   const p = M.parts[ref], colors = {[ref]: '#0f766e'};
   const rows = Object.entries(p.pins).map(([num, name]) => {
     const pn = pinNet[`${ref}.${num}`];
@@ -293,7 +338,7 @@ function selectPart(ref) {
   wire(); renderLists();
 }
 function selectQuestion(id) {
-  current = {q: id};
+  current = {q: id}; lightTraces(null);
   const q = M.questions.find(x => x.id === id), colors = {};
   for (const [r] of q.pins) colors[r] = '#dc2626';
   highlight(colors);
@@ -303,7 +348,7 @@ function selectQuestion(id) {
   wire(); renderLists();
 }
 function clear() {
-  current = null; highlight(null); renderLists();
+  current = null; highlight(null); lightTraces(null); renderLists();
   $('#detail').innerHTML = '<h3>Details</h3><p class="muted">Click a part on the board, or pick a net, part or open question.</p><h3>Confidence</h3>' +
     Object.entries(C).sort((a, b) => b[1].rank - a[1].rank).map(([k, v]) => `<p>${chip(k)} ${esc(v.meaning)}</p>`).join('');
 }
@@ -315,6 +360,8 @@ $('#legend').addEventListener('change', e => { const k = e.target.dataset.c; e.t
   if (current?.net) selectNet(current.net); else if (current?.ref) selectPart(current.ref); else renderLists(); });
 $('#search').addEventListener('input', renderLists);
 $('#clear').onclick = clear;
+$('#traces').onchange = e => { traceGroup.visible = e.target.checked; };
+$('#enhanced').onchange = e => setEnhanced(e.target.checked);
 $('#xray').onchange = e => { for (const m of boardMats) { m.transparent = e.target.checked; m.opacity = e.target.checked ? .3 : 1; m.depthWrite = !e.target.checked; m.needsUpdate = true; } };
 
 // ---------------------------------------------------------------- views and render loop
@@ -345,6 +392,8 @@ resize(); setView('iso'); renderLists(); clear(); frame();
 window.__project = ref => { const p = anchors[ref].clone().project(camera), r = renderer.domElement.getBoundingClientRect();
   return {x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height}; };
 window.__lit = () => [...lit].sort();
+window.__traces = () => traceMeshes.filter(m => m.material.opacity === 1).map(m => m.userData.net);
+window.__look = (pos, target) => { camera.position.set(...pos); controls.target.set(...target); controls.update(); };
 window.__ready = true;
 </script>
 </body>

@@ -20,7 +20,7 @@ The header checkboxes hide connections by confidence level. For example, untick 
 | [`model.yaml`](model.yaml)                                                                                               | **Source of truth:** parts, pins, nets, confidence and evidence per connection, open questions |
 | [`netlist.md`](netlist.md)                                                                                               | Generated tables: nets, evidence, open questions, parts, and a Mermaid block diagram           |
 | [`block-diagram.svg`](block-diagram.svg)                                                                                 | Generated block diagram                                                                        |
-| [`pcb-model.kicad_sch`](pcb-model.kicad_sch)                                                                             | Generated KiCad schematic: one symbol per part, nets as labels coloured by confidence          |
+| [`pcb-model.kicad_sch`](pcb-model.kicad_sch)                                                                             | Generated KiCad schematic: wires for verified connections, coloured labels for the rest        |
 | [`schematic.svg`](schematic.svg)                                                                                         | The schematic exported by `kicad-cli` (embedded in `index.html`)                               |
 | [`index.html`](index.html)                                                                                               | Generated viewer                                                                               |
 | [`board-3d.html`](board-3d.html)                                                                                         | Generated 3D view (see [3D view](#3d-view))                                                    |
@@ -33,6 +33,8 @@ The header checkboxes hide connections by confidence level. For example, untick 
 
 - **What it shows:** the board with both photos mapped onto its faces, and every modelled part as a simple 3D body on its side of the board. Wires leave their pads in their real colours.
 - **Controls:** drag to orbit, scroll to zoom, right-drag to pan. **Top**, **Bottom** and **3D** set the view; **X-ray board** makes the board see-through, which is useful for nets that cross sides.
+- **Traced copper** (on by default): the copper actually followed in the close-ups, drawn as copper strips on the right side of the board. This is the evidence for the wired connections. Hover over a strip to see its source photo; selecting a net lights its strips.
+- **Enhanced photo:** swaps in contrast-boosted textures (the same photos, no pixels added) in which the copper under the solder mask shows as outlines across the whole board. Use it to follow traces by eye; nothing in it has been traced.
 - **Selection:**
   - Click a part, or pick a net, part or open question in the side panel.
   - A net draws lines joining its parts (the shortest tree through them), each coloured by the weaker end's confidence. These lines show the model's connections, **not the copper route**.
@@ -56,9 +58,9 @@ Every connection (a pin on a net) has one level. A net is only as certain as its
 | ----------- | -------------------------------------------------------------------------------------- | ----------- |
 | `measured`  | Checked on the board with a meter                                                      | 0           |
 | `confirmed` | Silkscreen label, a wire seen soldered to the pad, or a measurement in `REPAIR_LOG.md` | 8           |
-| `photo`     | Trace, copper area or tinned strip followed in a close-up                              | 10          |
+| `photo`     | Trace, copper area or tinned strip followed in a close-up                              | 8           |
 | `datasheet` | Pin function from the part's datasheet (the part number itself is read from the photo) | 5           |
-| `assumed`   | Standard circuit practice or placement only                                            | 22          |
+| `assumed`   | Standard circuit practice or placement only                                            | 24          |
 
 Pins that aren't on any net are **unknown**, not unconnected. The schematic leaves them open, and the viewer draws parts with no known connection as dashed boxes.
 
@@ -70,13 +72,34 @@ New facts from the photos, beyond `REPAIR_LOG.md`:
 - **U3** reads **`D9924 2006`** in `parts/IMG_3631`, not `9624`. This most likely is a QX9924, a step-down LED driver with a built-in switch; its exposed pad is the switch node. The pin order isn't confirmed, so U3's pins aren't modelled.
 - **5 W LED:** the `5WL+` wire lead is bent along a tinned strip that runs to D16's (SK34) cathode (`parts/IMG_3628`).
 - **Motor area:**
-  - The capacitor between the `M+` and `M-` pads is **C6**. Its label is upside down in `parts/IMG_3619`; C8 is on the bottom, beside U2.
-  - R13 (0 Ω) links `M-` to U4 pin 8 (OUTA).
-  - A faint trace runs from U4 pin 5 (OUTB) toward `M+`.
-  - C9 sits against U4 pin 4 (VDD).
+  - The capacitor across the motor pads is **C6** (its label is upside down in `parts/IMG_3619`; C8 is on the bottom, beside U2). Traces in a contrast-enhanced close-up run from each end of C6 to the `M+` and `M-` pads.
+  - A trace runs from U4 pin 5 (OUTB) to `M+`, and one from pin 8 (OUTA) to R13 (0 Ω). That R13's other end goes to `M-` is still only placement.
+  - C9 sits against U4 pin 4 (VDD); no trace followed.
 - **U4 orientation:** with its text upright, pin 1 (dimple) is bottom-left, by the `U4` label. Pins 1–4 face the 47 µF capacitor C7.
 - **Front panel:** 7 LEDs (D3–D9: 3 red for the timer, 2 yellow, 2 green), 3 push-buttons (SW1–SW3) and the slide switch S1. SW5 is an empty footprint next to Q1.
 - **Electrolytic next to `102`:** it is **C11** (100 µF); C10 is the small SMD part below it.
+
+**Audit (2026-11-08).** Four connections were labelled `photo` on placement alone: C1 to U2 pin 3, C9 to U4 pin 4, R13 to `M-` and R3 to `SSL-`. They are now `assumed`, and only connections backed by a followed trace, copper area or soldered wire count as verified.
+
+## Schematic
+
+`pcb-model.kicad_sch` draws a **wire** only for a verified connection (`photo`, `confirmed` or `measured`). Everything else keeps a net label coloured by its confidence. Pins with neither a wire nor a label are unknown. The wired clusters are laid out by hand in `schematic_layout` in `model.yaml`:
+
+| Block          | Wired                                                   |
+| -------------- | ------------------------------------------------------- |
+| Input          | `DC+` pad ↔ R1B ↔ `R1B` pad                             |
+| Motor driver   | U4 pin 5 ↔ C6 ↔ `M+` pad; C6 ↔ `M-` pad; U4 pin 8 ↔ R13 |
+| 5 W LED driver | `5WL+` pad ↔ D16                                        |
+
+`build.py` refuses a wire that:
+
+- joins two nets;
+- touches a pin it shouldn't;
+- runs diagonally;
+- lands in the middle of another wire;
+- ends on a connection below `photo`.
+
+It also refuses a model where a verified connection has no wire. Promote a connection to `measured` in `model.yaml`, then add its wire to `schematic_layout`.
 
 ## Open questions
 
@@ -104,7 +127,7 @@ Results on 2026-11-07:
   - 88 `pin_not_connected`: exactly the 88 unknown pins.
   - 55 `lib_symbol_issues`: the symbols are embedded in the schematic rather than in a KiCad library.
   - 1 `label_dangling`: `5WL-`, a net whose only known member is the pad.
-- **3D view:** a headless Chromium test with software WebGL ([`tests/ui3d-test.mjs`](tests/ui3d-test.mjs)) passes 7 checks: the scene renders, the views switch, clicking U4 in the scene selects it, and net and question selection light the right parts. No JavaScript errors.
+- **3D view:** a headless Chromium test with software WebGL ([`tests/ui3d-test.mjs`](tests/ui3d-test.mjs)) passes 10 checks: the scene renders, the views switch, clicking U4 in the scene selects it, net and question selection light the right parts, `M+` lights only its traced copper, and the trace and enhanced-photo toggles work. No JavaScript errors.
 - **2D viewer:** a headless Chromium test ([`tests/ui-test.mjs`](tests/ui-test.mjs), run command in its header) passes 14 checks, covering net and part highlighting, the confidence filter, search and all four tabs, with no JavaScript errors.
 
 ## Limits
