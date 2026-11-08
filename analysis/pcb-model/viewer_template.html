@@ -33,6 +33,10 @@
   .photo h2 { font-size:14px; margin:2px 4px 8px; display:flex; justify-content:space-between; }
   .photo h2 span { color:var(--muted); font-weight:400; font-size:12px; }
   .stage { position:relative; width:100%; }
+  .stage { user-select:none; -webkit-user-select:none; width:calc(var(--pz, 1) * 100%); }
+  .photo { overflow:auto; max-height:calc(100vh - 40px); }
+  .toolbar .zoom button, .toolbar > button, .toolbar > label { font:inherit; }
+  .stage img { -webkit-user-drag:none; pointer-events:none; }
   .stage img { width:100%; display:block; border-radius:4px; }
   .stage svg { position:absolute; inset:0; width:100%; height:100%; }
   .box { fill:transparent; stroke:#94a3b8; stroke-width:2; cursor:pointer; vector-effect:non-scaling-stroke; }
@@ -63,6 +67,30 @@
   .q .check { background:#f0fdfa; padding:6px 8px; border-radius:6px; }
   footer { color:var(--muted); font-size:12px; padding:0 20px 20px; }
   @media (max-width: 1100px) { .board { grid-template-columns: 1fr; } .side, .detail { position:static; max-height:none; } }
+  .trace { fill:none; stroke:#c2410c; stroke-width:3; stroke-linejoin:round; stroke-linecap:round; vector-effect:non-scaling-stroke; cursor:pointer; }
+  .trace-halo { fill:none; stroke:rgba(255,255,255,.75); stroke-width:6; vector-effect:non-scaling-stroke; pointer-events:none; }
+  .dim .trace { opacity:.25; } .dim .trace.hit { opacity:1; stroke:#f59e0b; stroke-width:5; }
+  .trace.sel { stroke:#0d9488; stroke-width:5; opacity:1; }
+  .notraces .trace, .notraces .trace-halo { display:none; }
+  .handle { fill:#fff; stroke:#0d9488; stroke-width:2.5; vector-effect:non-scaling-stroke; cursor:grab; }
+  .handle.mid { fill:#ccfbf1; cursor:copy; }
+  .editbox { fill:rgba(13,148,136,.12); stroke:#0d9488; stroke-width:2.5; stroke-dasharray:6 4; vector-effect:non-scaling-stroke; cursor:move; }
+  .draft { fill:none; stroke:#0d9488; stroke-width:3; stroke-dasharray:7 5; vector-effect:non-scaling-stroke; pointer-events:none; }
+  .drawing .stage svg { cursor:crosshair; }
+  .edit-toggle[aria-pressed="true"] { background:#0f766e; color:#fff; border-color:#0f766e; }
+  .editbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; background:#f0fdfa; border:1px solid #99f6e4; border-radius:8px; padding:6px 8px; margin-bottom:10px; }
+  .editbar button, .editbar .file { font:inherit; padding:4px 10px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; }
+  .editbar button.on { background:#0f766e; color:#fff; border-color:#0f766e; }
+  .editbar button.primary { background:#1d4ed8; color:#fff; border-color:#1d4ed8; }
+  .editbar button:disabled { opacity:.45; cursor:default; }
+  .editbar .sep { width:1px; height:22px; background:#cbd5e1; margin:0 4px; }
+  .banner { background:#fef3c7; border:1px solid #fcd34d; padding:6px 10px; border-radius:8px; margin:0 0 10px; font-size:13px; }
+  .banner button { font:inherit; margin-left:6px; }
+  .detail select, .detail input[type=text] { font:inherit; font-size:12px; width:100%; padding:2px 4px; border:1px solid var(--line); border-radius:4px; }
+  .detail .row2 { display:flex; gap:4px; margin-top:3px; }
+  .detail button { font:inherit; font-size:12.5px; padding:3px 9px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; margin:2px 4px 2px 0; }
+  .detail button.danger { color:#b91c1c; border-color:#fca5a5; }
+  .edited { color:#0f766e; font-weight:600; }
 </style>
 </head>
 <body>
@@ -87,14 +115,31 @@
       <input type="search" id="search" placeholder="Filter nets and parts…" aria-label="Filter nets and parts">
       <h3>Nets</h3>
       <ul class="list" id="nets"></ul>
+      <h3>Traces</h3>
+      <ul class="list" id="traces"></ul>
       <h3>Parts</h3>
       <ul class="list" id="parts"></ul>
     </aside>
     <div class="photos">
+      <div class="banner" id="banner" hidden></div>
       <div class="toolbar">
         <label><input type="checkbox" id="tags"> Show all part labels</label>
+        <label><input type="checkbox" id="showtraces" checked> Traces</label>
         <button id="clear">Clear selection</button>
-        <span class="muted">Click a box or a list item. Dashed boxes: no known connections.</span>
+        <span class="zoom"><button data-pz="-1" title="Zoom photos out">−</button><button data-pz="1" title="Zoom photos in">+</button></span>
+        <button id="edit" class="edit-toggle" aria-pressed="false">✎ Edit annotations</button>
+        <span class="muted" id="hint">Click a box, a trace or a list item. Dashed boxes: no known connections.</span>
+      </div>
+      <div class="editbar" id="editbar" hidden>
+        <button data-tool="select" class="on" title="Select a part or trace; drag boxes, corners and trace points">Select / move</button>
+        <button data-tool="draw" title="Click points on a photo; double-click, Enter or Finish to end; Esc cancels">Draw trace</button>
+        <button id="finish" hidden>Finish trace</button>
+        <button id="undo" title="Ctrl+Z" disabled>Undo</button>
+        <span class="sep"></span>
+        <button id="export" class="primary">Export annotations.json</button>
+        <label class="file">Import…<input type="file" id="import" accept=".json,application/json" hidden></label>
+        <button id="discard">Discard edits</button>
+        <span class="muted" id="editstatus"></span>
       </div>
       <section class="photo"><h2>Top side <span id="cap-top"></span></h2><div class="stage" id="stage-top"><img alt="Board top side" src="__TOP_URI__"></div></section>
       <section class="photo"><h2>Bottom side <span id="cap-bottom"></span></h2><div class="stage" id="stage-bottom"><img alt="Board bottom side" src="__BOTTOM_URI__"></div></section>
@@ -109,6 +154,7 @@
 </main>
 
 <main id="tab-schematic">
+  <p class="banner" id="schemnote" hidden></p>
   <div class="toolbar">
     <button data-z="-1">−</button><button data-z="1">+</button><button data-z="0">Fit</button>
     <span class="muted">Exported from pcb-model.kicad_sch with kicad-cli. Label colour = confidence. Pins without a label are unknown.</span>
@@ -126,29 +172,96 @@
 <script id="model" type="application/json">__DATA__</script>
 <script>
 (() => {
-  const M = JSON.parse(document.getElementById('model').textContent);
-  const C = M.confidence;
+  const D = JSON.parse(document.getElementById('model').textContent);
+  const C = D.confidence;
   const rank = k => C[k].rank;
   const $ = s => document.querySelector(s);
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const chip = k => `<span class="chip" style="background:${C[k].color}">${k}</span>`;
+  const clone = o => JSON.parse(JSON.stringify(o));
   const enabled = new Set(Object.keys(C));
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  const LEVELS = Object.keys(C).sort((a, b) => rank(b) - rank(a));
 
-  // pin -> {net, conf, evidence}
-  const pinNet = {};
-  for (const [name, net] of Object.entries(M.nets))
-    for (const n of net.nodes) pinNet[`${n.ref}.${n.pin}`] = {net: name, conf: n.conf, evidence: n.evidence};
-  const partKnown = ref => Object.keys(M.parts[ref].pins).some(p => pinNet[`${ref}.${p}`]);
+  // ------------------------------------------------------------ annotations (editor state)
+  const BUILT = clone(D.annotations);                       // what the last build used
+  const STORE = 'pcbmodel-annotations:' + D.board.marking;
+  let ann = clone(BUILT), restored = false;
+  try {
+    const saved = localStorage.getItem(STORE);
+    if (saved && saved !== JSON.stringify(BUILT)) { ann = JSON.parse(saved); restored = true; }
+  } catch (e) { /* storage unavailable: edits live in the page only */ }
+  const undoStack = [];
 
-  $('#sub').textContent = `${M.board.marking} · model of ${M.board.model_date} · ` +
-    `${Object.keys(M.parts).length} parts, ${Object.keys(M.nets).length} nets, ${M.questions.length} open questions`;
-  $('#foot').textContent = 'Generated by analysis/pcb-model/build.py from model.yaml. ' +
+  // Same rules as build.py apply_annotations().
+  function applyAnnotations(a) {
+    const parts = clone(D.parts), nets = clone(D.nets);
+    for (const [ref, bySide] of Object.entries(a.boxes || {})) {
+      if (!parts[ref]) continue;
+      const box = parts[ref].box || (parts[ref].box = {});
+      for (const [side, v] of Object.entries(bySide)) { if (v === null) delete box[side]; else box[side] = v.slice(); }
+    }
+    for (const c of a.connections || []) {
+      const pin = String(c.pin);
+      for (const n of Object.values(nets)) n.nodes = n.nodes.filter(x => !(x.ref === c.ref && x.pin === pin));
+      if (c.net) (nets[c.net] || (nets[c.net] = {description: 'Added in the editor.', nodes: []}))
+        .nodes.push({ref: c.ref, pin, conf: c.conf, evidence: c.evidence || ''});
+    }
+    for (const k of Object.keys(nets)) if (!nets[k].nodes.length) delete nets[k];
+    const netConfidence = {};
+    for (const [k, n] of Object.entries(nets)) netConfidence[k] = n.nodes.map(x => x.conf).reduce((p, q) => rank(p) <= rank(q) ? p : q);
+    return {parts, nets, traces: clone(a.traces || []), netConfidence};
+  }
+  let M, pinNet;
+  function recompute() {
+    M = applyAnnotations(ann);
+    pinNet = {};
+    for (const [name, net] of Object.entries(M.nets)) for (const n of net.nodes) pinNet[`${n.ref}.${n.pin}`] = {net: name, conf: n.conf, evidence: n.evidence};
+  }
+  recompute();
+
+  function changeCount() {
+    let n = 0;
+    const byId = a => Object.fromEntries((a.traces || []).map(t => [t.id, JSON.stringify(t)]));
+    const t0 = byId(BUILT), t1 = byId(ann);
+    for (const id of new Set([...Object.keys(t0), ...Object.keys(t1)])) if (t0[id] !== t1[id]) n++;
+    const flat = a => Object.entries(a.boxes || {}).flatMap(([r, s]) => Object.entries(s).map(([k, v]) => `${r}.${k}=${JSON.stringify(v)}`));
+    const b0 = new Set(flat(BUILT)), b1 = new Set(flat(ann));
+    for (const x of b1) if (!b0.has(x)) n++;
+    for (const x of b0) if (!b1.has(x)) n++;
+    const cs = a => new Set((a.connections || []).map(c => JSON.stringify([c.ref, String(c.pin), c.net || null, c.conf || null, c.evidence || ''])));
+    const c0 = cs(BUILT), c1 = cs(ann);
+    for (const x of c1) if (!c0.has(x)) n++;
+    for (const x of c0) if (!c1.has(x)) n++;
+    return n;
+  }
+  function mutate(fn) {
+    undoStack.push(JSON.stringify(ann));
+    fn(ann);
+    commit();
+  }
+  function commit() {
+    try { localStorage.setItem(STORE, JSON.stringify(ann)); } catch (e) { /* page-only */ }
+    recompute(); drawOverlays(); renderLists(); reselect(); status();
+  }
+  function status() {
+    const n = changeCount();
+    $('#undo').disabled = !undoStack.length;
+    $('#editstatus').innerHTML = n ? `<span class="edited">${n} change${n > 1 ? 's' : ''}</span> not yet built: export, save as analysis/pcb-model/annotations.json, run ./build.sh`
+      : 'No changes since the last build.';
+    const note = $('#schemnote');
+    note.hidden = !n;
+    note.textContent = `The schematic, block diagram and 3D view reflect the last build; ${n} edit${n > 1 ? 's' : ''} in this browser are not in them yet.`;
+  }
+
+  // ------------------------------------------------------------ header and legend
+  $('#sub').textContent = `${D.board.marking} · model of ${D.board.model_date} · ` +
+    `${Object.keys(D.parts).length} parts, ${Object.keys(M.nets).length} nets, ${D.questions.length} open questions`;
+  $('#foot').textContent = 'Generated by analysis/pcb-model/build.py from model.yaml and annotations.json. ' +
     'Photo-derived connections are hypotheses until measured.';
-
-  // legend / filters
-  for (const [k, v] of Object.entries(C).sort((a, b) => b[1].rank - a[1].rank)) {
+  for (const k of LEVELS) {
     const l = document.createElement('label');
-    l.title = v.meaning;
+    l.title = C[k].meaning;
     l.innerHTML = `<input type="checkbox" checked data-c="${k}">${chip(k)}`;
     $('#legend').append(l);
   }
@@ -157,34 +270,285 @@
     renderLists(); reselect();
   });
 
-  // photo overlays
-  const SVGNS = 'http://www.w3.org/2000/svg';
-  const boxes = {};
-  for (const [side, ph] of Object.entries(M.photos)) {
+  // ------------------------------------------------------------ photo overlays
+  const svgs = {};
+  for (const [side, ph] of Object.entries(D.photos)) {
     $(`#cap-${side}`).textContent = ph.file;
     const svg = document.createElementNS(SVGNS, 'svg');
     svg.setAttribute('viewBox', `0 0 ${ph.w} ${ph.h}`);
-    for (const [ref, part] of Object.entries(M.parts)) {
-      const b = part.box && part.box[side]; if (!b) continue;
-      const [x0, y0, x1, y1] = b.map(v => v * ph.scale);
-      const r = document.createElementNS(SVGNS, 'rect');
-      Object.entries({x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 3}).forEach(([a, v]) => r.setAttribute(a, v));
-      r.classList.add('box'); if (!partKnown(ref)) r.classList.add('unknown');
-      r.dataset.ref = ref;
-      const t = document.createElementNS(SVGNS, 'title'); t.textContent = `${ref} — ${part.value}`; r.append(t);
-      r.addEventListener('click', () => selectPart(ref));
-      const tag = document.createElementNS(SVGNS, 'text');
-      tag.setAttribute('x', x0 + 2); tag.setAttribute('y', Math.max(14, y0 - 4));
-      tag.classList.add('tag'); tag.dataset.ref = ref; tag.textContent = ref.replace(/^J_/, '');
-      svg.append(r, tag);
-      (boxes[ref] ||= []).push(r, tag);
-    }
+    svg.dataset.side = side;
     $(`#stage-${side}`).append(svg);
+    svgs[side] = svg;
+  }
+  const el = (tag, attrs, parent) => {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+    if (parent) parent.append(e);
+    return e;
+  };
+  const toPhoto = (side, x, y) => [Math.round(x / D.photos[side].scale), Math.round(y / D.photos[side].scale)];
+  const toView = (side, x, y) => [x * D.photos[side].scale, y * D.photos[side].scale];
+  function svgPoint(svg, ev) {
+    const p = svg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  }
+  const partKnown = ref => Object.keys(M.parts[ref].pins).some(p => pinNet[`${ref}.${p}`]);
+
+  let current = null, highlightState = null;
+  let editing = false, tool = 'select', draft = null, drag = null;
+
+  function drawOverlays() {
+    for (const [side, svg] of Object.entries(svgs)) {
+      svg.replaceChildren();
+      for (const [ref, part] of Object.entries(M.parts)) {
+        const b = part.box && part.box[side]; if (!b) continue;
+        const [x0, y0] = toView(side, b[0], b[1]), [x1, y1] = toView(side, b[2], b[3]);
+        const r = el('rect', {x: x0, y: y0, width: x1 - x0, height: y1 - y0, rx: 3, class: 'box' + (partKnown(ref) ? '' : ' unknown')}, svg);
+        r.dataset.ref = ref;
+        el('title', {}, r).textContent = `${ref} — ${part.value}`;
+        const tag = el('text', {x: x0 + 2, y: Math.max(14, y0 - 4), class: 'tag'}, svg);
+        tag.dataset.ref = ref; tag.textContent = ref.replace(/^J_/, '');
+      }
+      for (const t of M.traces.filter(t => t.side === side)) {
+        const pts = t.points.map(([x, y]) => toView(side, x, y).join(',')).join(' ');
+        el('polyline', {points: pts, class: 'trace-halo'}, svg);
+        const pl = el('polyline', {points: pts, class: 'trace'}, svg);
+        pl.dataset.trace = t.id; pl.dataset.net = t.net;
+        el('title', {}, pl).textContent = `trace ${t.id} · ${t.net} · ${t.evidence || ''}`;
+      }
+      if (editing) drawHandles(side, svg);
+      if (draft && draft.side === side) {
+        el('polyline', {points: draft.points.map(([x, y]) => toView(side, x, y).join(',')).join(' '), class: 'draft'}, svg);
+        for (const [x, y] of draft.points) { const [vx, vy] = toView(side, x, y); el('circle', {cx: vx, cy: vy, r: 5, class: 'handle', 'pointer-events': 'none'}, svg); }
+      }
+    }
+    applyHighlight();
+  }
+  function drawHandles(side, svg) {
+    if (current?.ref) {
+      const b = M.parts[current.ref].box?.[side];
+      if (b) {
+        const [x0, y0] = toView(side, b[0], b[1]), [x1, y1] = toView(side, b[2], b[3]);
+        const r = el('rect', {x: x0, y: y0, width: x1 - x0, height: y1 - y0, class: 'editbox'}, svg);
+        r.dataset.drag = 'move';
+        [[x0, y0, 'nw'], [x1, y0, 'ne'], [x1, y1, 'se'], [x0, y1, 'sw']].forEach(([x, y, c]) => {
+          const h = el('circle', {cx: x, cy: y, r: 6, class: 'handle'}, svg); h.dataset.drag = 'corner'; h.dataset.corner = c;
+        });
+      }
+    }
+    if (current?.trace) {
+      const t = M.traces.find(x => x.id === current.trace);
+      if (t && t.side === side) {
+        t.points.forEach(([x, y], i) => {
+          const [vx, vy] = toView(side, x, y);
+          const h = el('circle', {cx: vx, cy: vy, r: 6, class: 'handle'}, svg);
+          h.dataset.drag = 'point'; h.dataset.i = i;
+          el('title', {}, h).textContent = 'Drag to move; Alt-click or right-click to delete';
+        });
+        for (let i = 0; i + 1 < t.points.length; i++) {
+          const [ax, ay] = toView(side, ...t.points[i]), [bx, by] = toView(side, ...t.points[i + 1]);
+          const h = el('rect', {x: (ax + bx) / 2 - 4, y: (ay + by) / 2 - 4, width: 8, height: 8, class: 'handle mid'}, svg);
+          h.dataset.drag = 'insert'; h.dataset.i = i + 1;
+          el('title', {}, h).textContent = 'Drag to add a point here';
+        }
+      }
+    }
+  }
+  function highlight(refColors, traceNet = null, traceId = null) {
+    highlightState = {refColors, traceNet, traceId};
+    if (editing) drawOverlays(); else applyHighlight();   // edit handles follow the selection
+  }
+  function applyHighlight() {
+    const st = highlightState || {};
+    const any = !!(st.refColors || st.traceNet || st.traceId);
+    for (const svg of Object.values(svgs)) {
+      svg.classList.toggle('dim', any);
+      svg.classList.toggle('notraces', !$('#showtraces').checked);
+      svg.querySelectorAll('.box, .tag').forEach(e => {
+        const hit = !!(st.refColors && st.refColors[e.dataset.ref]);
+        e.classList.toggle('hit', hit);
+        if (e.tagName === 'rect') e.style.stroke = hit ? st.refColors[e.dataset.ref] : '';
+      });
+      svg.querySelectorAll('.trace').forEach(e => {
+        e.classList.toggle('hit', !!st.traceNet && e.dataset.net === st.traceNet);
+        e.classList.toggle('sel', !!st.traceId && e.dataset.trace === st.traceId);
+      });
+    }
   }
   $('#tags').addEventListener('change', e => document.querySelectorAll('.stage').forEach(s => s.classList.toggle('showtags', e.target.checked)));
+  $('#showtraces').addEventListener('change', applyHighlight);
 
-  // lists
-  let current = null;
+  // ------------------------------------------------------------ pointer handling on the photos
+  for (const [side, svg] of Object.entries(svgs)) {
+    svg.addEventListener('pointerdown', ev => {
+      const t = ev.target;
+      if (editing && tool === 'select' && t.dataset.drag) {
+        if (t.dataset.drag === 'point' && (ev.altKey || ev.button === 2)) { deletePoint(+t.dataset.i); ev.preventDefault(); return; }
+        const p = svgPoint(svg, ev);
+        drag = {side, kind: t.dataset.drag, corner: t.dataset.corner, i: +t.dataset.i, start: [p.x, p.y], moved: false};
+        svg.setPointerCapture(ev.pointerId);
+        ev.preventDefault();
+      }
+    });
+    svg.addEventListener('pointermove', ev => {
+      if (!drag || drag.side !== side) return;
+      const p = svgPoint(svg, ev);
+      const dx = p.x - drag.start[0], dy = p.y - drag.start[1];
+      if (!drag.moved && Math.hypot(dx, dy) < 3) return;
+      if (!drag.moved) { undoStack.push(JSON.stringify(ann)); drag.moved = true; }
+      const [px, py] = toPhoto(side, p.x, p.y);
+      const sc = D.photos[side].scale, ddx = Math.round(dx / sc), ddy = Math.round(dy / sc);
+      if (drag.kind === 'point' || drag.kind === 'insert') {
+        const tr = ann.traces.find(x => x.id === current.trace);
+        if (drag.kind === 'insert') { tr.points.splice(drag.i, 0, [px, py]); drag.kind = 'point'; }
+        else tr.points[drag.i] = [px, py];
+      } else {
+        const ref = current.ref, base = drag.box || (drag.box = M.parts[ref].box[side].slice());
+        let [x0, y0, x1, y1] = base;
+        if (drag.kind === 'move') { x0 += ddx; x1 += ddx; y0 += ddy; y1 += ddy; }
+        else {
+          if (drag.corner.includes('w')) x0 = Math.min(px, x1 - 4); else x1 = Math.max(px, x0 + 4);
+          if (drag.corner.includes('n')) y0 = Math.min(py, y1 - 4); else y1 = Math.max(py, y0 + 4);
+        }
+        setBox(ref, side, [x0, y0, x1, y1]);
+      }
+      recompute(); drawOverlays();
+    });
+    svg.addEventListener('pointerup', ev => {
+      if (drag && drag.side === side) {
+        const moved = drag.moved; drag = null;
+        if (moved) { commit(); return; }
+      }
+    });
+    svg.addEventListener('click', ev => {
+      if (editing && tool === 'draw') { if (ev.detail >= 2) finishDraft(); else addDraftPoint(side, svgPoint(svg, ev)); return; }
+      const t = ev.target;
+      if (t.dataset.trace) { selectTrace(t.dataset.trace); return; }
+      if (t.dataset.ref) { selectPart(t.dataset.ref); return; }
+    });
+    svg.addEventListener('dblclick', ev => { if (editing && tool === 'draw') { ev.preventDefault(); finishDraft(); } });
+    svg.addEventListener('contextmenu', ev => { if (editing && ev.target.dataset.drag === 'point') ev.preventDefault(); });
+  }
+
+  // ------------------------------------------------------------ editing operations
+  function baseBox(ref, side) { const b = D.parts[ref].box && D.parts[ref].box[side]; return b ? b.slice() : null; }
+  function setBox(ref, side, value) {   // value: [x0,y0,x1,y1] or null (remove); drop the override when it equals the base
+    ann.boxes = ann.boxes || {};
+    const o = ann.boxes[ref] || (ann.boxes[ref] = {});
+    if (JSON.stringify(value) === JSON.stringify(baseBox(ref, side))) delete o[side]; else o[side] = value;
+    if (!Object.keys(o).length) delete ann.boxes[ref];
+  }
+  function baseNode(ref, pin) {
+    for (const [name, net] of Object.entries(D.nets)) for (const n of net.nodes) if (n.ref === ref && n.pin === pin) return {net: name, conf: n.conf, evidence: n.evidence};
+    return null;
+  }
+  function setConnection(ref, pin, net, conf, evidence) {
+    ann.connections = (ann.connections || []).filter(c => !(c.ref === ref && String(c.pin) === pin));
+    const b = baseNode(ref, pin);
+    const same = b ? (net === b.net && conf === b.conf && evidence === b.evidence) : !net;
+    if (!same) ann.connections.push(net ? {ref, pin, net, conf, evidence} : {ref, pin, net: null});
+  }
+  function newTraceId() {
+    const n = Math.max(0, ...ann.traces.map(t => +(String(t.id).match(/\d+/) || [0])[0]));
+    return 't' + (n + 1);
+  }
+  function addDraftPoint(side, p) {
+    const pt = toPhoto(side, p.x, p.y);
+    if (!draft) draft = {side, points: [], extend: null};
+    if (draft.side !== side) { $('#hint').textContent = 'A trace stays on one side: finish it first.'; return; }
+    draft.points.push(pt);
+    $('#finish').hidden = draft.points.length < 2 && !draft.extend;
+    drawOverlays();
+  }
+  function finishDraft() {
+    if (!draft) return;
+    const d = draft; draft = null; $('#finish').hidden = true;
+    // a double-click to finish also fires two clicks: drop repeated points
+    d.points = d.points.filter((p, i, a) => i === 0 || Math.hypot(p[0] - a[i - 1][0], p[1] - a[i - 1][1]) > 3);
+    if (d.extend) {
+      if (d.points.length) mutate(a => { a.traces.find(t => t.id === d.extend).points.push(...d.points); });
+      setTool('select'); selectTrace(d.extend); return;
+    }
+    if (d.points.length < 2) { drawOverlays(); return; }
+    const id = newTraceId();
+    const net = current?.net || Object.keys(M.nets)[0];
+    mutate(a => a.traces.push({id, net, side: d.side, points: d.points, evidence: ''}));
+    setTool('select'); selectTrace(id);
+  }
+  function cancelDraft() { draft = null; $('#finish').hidden = true; drawOverlays(); }
+  function deletePoint(i) {
+    const t = ann.traces.find(x => x.id === current.trace);
+    if (t.points.length <= 2) { if (confirm(`Trace ${t.id} needs two points. Delete the whole trace?`)) deleteTrace(t.id); return; }
+    mutate(a => a.traces.find(x => x.id === t.id).points.splice(i, 1));
+  }
+  function deleteTrace(id) { mutate(a => { a.traces = a.traces.filter(t => t.id !== id); }); clear(); }
+
+  function setTool(t) {
+    tool = t; if (t !== 'draw') cancelDraft();
+    document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+    document.body.classList.toggle('drawing', t === 'draw');
+    $('#hint').textContent = t === 'draw'
+      ? 'Click points on one photo; double-click, Enter or “Finish trace” to end; Esc cancels. The new trace takes the selected net.'
+      : 'Select a part to move or resize its box and edit its pins; select a trace to drag its points.';
+  }
+  document.querySelectorAll('[data-tool]').forEach(b => b.onclick = () => setTool(b.dataset.tool));
+  $('#finish').onclick = finishDraft;
+  $('#undo').onclick = () => { if (!undoStack.length) return; ann = JSON.parse(undoStack.pop()); commit(); };
+  $('#edit').onclick = () => {
+    editing = !editing;
+    $('#edit').setAttribute('aria-pressed', editing);
+    $('#editbar').hidden = !editing;
+    setTool('select');
+    if (!editing) $('#hint').textContent = 'Click a box, a trace or a list item. Dashed boxes: no known connections.';
+    drawOverlays(); reselect(); status();
+  };
+  function exportText() {
+    const out = {
+      _comment: 'Edits made in index.html\'s editor (traces, part-box overrides, connection overrides). build.py applies them on top of model.yaml. Export a new copy from the editor to replace this file.',
+      version: 1, board: D.board.marking, traces: ann.traces, boxes: ann.boxes || {}, connections: ann.connections || [],
+    };
+    return JSON.stringify(out, null, 2).replace(/\[\s+(-?\d+(?:\.\d+)?),\s+(-?\d+(?:\.\d+)?)\s+\]/g, '[$1, $2]') + '\n';
+  }
+  $('#export').onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([exportText()], {type: 'application/json'}));
+    a.download = 'annotations.json'; a.click(); URL.revokeObjectURL(a.href);
+  };
+  function importAnnotations(text) {
+    const a = JSON.parse(text);
+    const problems = [];
+    if (!Array.isArray(a.traces || [])) problems.push('traces must be a list');
+    for (const t of a.traces || []) {
+      if (!D.photos[t.side]) problems.push(`trace ${t.id}: unknown side`);
+      if (!Array.isArray(t.points) || t.points.length < 2) problems.push(`trace ${t.id}: needs 2 points`);
+    }
+    for (const c of a.connections || []) if (!D.parts[c.ref] || !(String(c.pin) in D.parts[c.ref].pins)) problems.push(`unknown pin ${c.ref}.${c.pin}`);
+    for (const ref of Object.keys(a.boxes || {})) if (!D.parts[ref]) problems.push(`unknown part ${ref}`);
+    if (problems.length) throw new Error(problems.join('; '));
+    mutate(s => { s.traces = a.traces || []; s.boxes = a.boxes || {}; s.connections = a.connections || []; });
+  }
+  $('#import').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try { importAnnotations(await f.text()); } catch (err) { alert('Could not import: ' + err.message); }
+    e.target.value = '';
+  };
+  $('#discard').onclick = () => { if (confirm('Discard all edits made in this browser since the last build?')) { mutate(s => Object.assign(s, clone(BUILT))); } };
+  document.addEventListener('keydown', e => {
+    const typing = /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName);
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !typing) { e.preventDefault(); $('#undo').click(); }
+    else if (e.key === 'Escape') { if (draft) cancelDraft(); else if (!typing) clear(); }
+    else if (e.key === 'Enter' && draft && !typing) finishDraft();
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && editing && current?.trace && !typing) { e.preventDefault(); if (confirm(`Delete trace ${current.trace}?`)) deleteTrace(current.trace); }
+  });
+  if (restored) {
+    const b = $('#banner');
+    b.hidden = false;
+    b.innerHTML = `Restored ${changeCount()} unsaved edit(s) from this browser. <button id="b-edit">Open editor</button><button id="b-discard">Discard them</button>`;
+    $('#b-edit').onclick = () => { if (!editing) $('#edit').click(); b.hidden = true; };
+    $('#b-discard').onclick = () => { ann = clone(BUILT); undoStack.length = 0; commit(); b.hidden = true; };
+  }
+
+  // ------------------------------------------------------------ lists and detail panels
   function renderLists() {
     const f = $('#search').value.trim().toLowerCase();
     const nets = $('#nets'); nets.innerHTML = '';
@@ -199,12 +563,19 @@
       if (current && current.net === name) li.classList.add('sel');
       nets.append(li);
     }
+    const tl = $('#traces'); tl.innerHTML = '';
+    for (const t of M.traces) {
+      if (f && !(t.id + ' ' + t.net + ' ' + (t.evidence || '')).toLowerCase().includes(f)) continue;
+      const li = document.createElement('li');
+      li.innerHTML = `<span>${esc(t.id)} · ${esc(t.net)}</span><span class="n">${t.side}</span>`;
+      li.dataset.trace = t.id; li.onclick = () => selectTrace(t.id);
+      if (current && current.trace === t.id) li.classList.add('sel');
+      tl.append(li);
+    }
     const parts = $('#parts'); parts.innerHTML = '';
-    const nat = (a, b) => a.localeCompare(b, undefined, {numeric: true});
-    for (const ref of Object.keys(M.parts).sort(nat)) {
+    for (const ref of Object.keys(M.parts).sort((a, b) => a.localeCompare(b, undefined, {numeric: true}))) {
       const p = M.parts[ref];
-      const hay = (ref + ' ' + p.value + ' ' + (p.label || '')).toLowerCase();
-      if (f && !hay.includes(f)) continue;
+      if (f && !(ref + ' ' + p.value + ' ' + (p.label || '')).toLowerCase().includes(f)) continue;
       const li = document.createElement('li');
       li.innerHTML = `<span>${esc(p.label || ref)}</span><span class="n">${esc(p.value).slice(0, 26)}</span>`;
       li.onclick = () => selectPart(ref);
@@ -213,40 +584,32 @@
     }
   }
   $('#search').addEventListener('input', renderLists);
-
-  function highlight(refColors) {
-    document.querySelectorAll('.stage svg').forEach(s => s.classList.toggle('dim', !!refColors));
-    document.querySelectorAll('.box, .tag').forEach(el => { el.classList.remove('hit'); if (el.tagName === 'rect') el.style.stroke = ''; });
-    if (!refColors) return;
-    for (const [ref, color] of Object.entries(refColors))
-      for (const el of boxes[ref] || []) { el.classList.add('hit'); if (el.tagName === 'rect') el.style.stroke = color; }
-  }
-
-  function questionsFor(pred) {
-    return M.questions.filter(q => q.pins.some(([r, p]) => pred(r, String(p))));
-  }
-  function qList(qs) {
-    if (!qs.length) return '';
-    return `<h3>Open questions</h3>` + qs.map(q => `<p><b>${q.id}</b> ${esc(q.title)}<br><span class="ev">Check: ${esc(q.check)}</span></p>`).join('');
-  }
+  const questionsFor = pred => D.questions.filter(q => q.pins.some(([r, p]) => pred(r, String(p))));
+  const qList = qs => qs.length ? '<h3>Open questions</h3>' + qs.map(q => `<p><b>${q.id}</b> ${esc(q.title)}<br><span class="ev">Check: ${esc(q.check)}</span></p>`).join('') : '';
+  const netOptions = sel => ['<option value="">(unknown)</option>', ...Object.keys(M.nets).map(n => `<option${n === sel ? ' selected' : ''}>${esc(n)}</option>`),
+    '<option value="__new__">New net…</option>'].join('');
+  const confOptions = sel => LEVELS.map(k => `<option${k === sel ? ' selected' : ''}>${k}</option>`).join('');
 
   function selectNet(name) {
+    if (!M.nets[name]) return clear();
     current = {net: name};
     const net = M.nets[name];
     const vis = net.nodes.filter(n => enabled.has(n.conf));
     const colors = {};
     for (const n of vis) if (!colors[n.ref] || rank(n.conf) < rank(colors[n.ref].c)) colors[n.ref] = {c: n.conf};
-    highlight(Object.fromEntries(Object.entries(colors).map(([r, v]) => [r, C[v.c].color])));
+    highlight(Object.fromEntries(Object.entries(colors).map(([r, v]) => [r, C[v.c].color])), name);
     const rows = vis.map(n => {
       const p = M.parts[n.ref];
       return `<tr><td><a data-ref="${n.ref}">${esc(p.label || n.ref)}</a>.${esc(n.pin)}<br><span class="ev">${esc(p.pins[n.pin])}</span></td>` +
         `<td>${chip(n.conf)}<div class="ev">${esc(n.evidence)}</div></td></tr>`;
     }).join('');
     const hidden = net.nodes.length - vis.length;
+    const traced = M.traces.filter(t => t.net === name);
     $('#detail').innerHTML = `<h3>Net</h3><h2 style="margin:0 0 4px">${esc(name)}</h2>` +
       `<p>${esc(net.description)}</p><p>Weakest link: ${chip(M.netConfidence[name])}</p>` +
       `<table><tr><th>Pin</th><th>Confidence and evidence</th></tr>${rows}</table>` +
       (hidden ? `<p class="muted">${hidden} connection(s) hidden by the confidence filter.</p>` : '') +
+      (traced.length ? '<h3>Traces</h3>' + traced.map(t => `<p class="ev"><a data-trace="${t.id}">${t.id}</a> (${t.side}): ${esc(t.evidence || '')}</p>`).join('') : '') +
       qList(questionsFor((r, p) => net.nodes.some(n => n.ref === r && n.pin === p)));
     wireLinks(); renderLists();
   }
@@ -255,73 +618,163 @@
     current = {ref};
     const p = M.parts[ref];
     const colors = {[ref]: '#0f766e'};
-    const rows = Object.entries(p.pins).map(([num, name]) => {
+    for (const num of Object.keys(p.pins)) {
       const pn = pinNet[`${ref}.${num}`];
-      if (pn && enabled.has(pn.conf)) {
-        for (const n of M.nets[pn.net].nodes) if (n.ref !== ref && enabled.has(n.conf)) colors[n.ref] ||= '#f59e0b';
-        return `<tr><td>${esc(num)}</td><td>${esc(name)}</td><td><a data-net="${esc(pn.net)}">${esc(pn.net)}</a> ${chip(pn.conf)}</td></tr>`;
-      }
-      return `<tr><td>${esc(num)}</td><td>${esc(name)}</td><td class="muted">${pn ? 'hidden by filter' : 'unknown'}</td></tr>`;
-    }).join('');
+      if (pn && enabled.has(pn.conf)) for (const n of M.nets[pn.net].nodes) if (n.ref !== ref && enabled.has(n.conf)) colors[n.ref] = colors[n.ref] || '#f59e0b';
+    }
     highlight(colors);
+    let body;
+    if (editing) {
+      const rows = Object.entries(p.pins).map(([num, name]) => {
+        const pn = pinNet[`${ref}.${num}`] || {net: '', conf: 'assumed', evidence: ''};
+        const edited = (ann.connections || []).some(c => c.ref === ref && String(c.pin) === num);
+        return `<tr data-pin="${esc(num)}"><td>${esc(num)}<br><span class="ev">${esc(name)}</span>${edited ? '<br><span class="edited">edited</span>' : ''}</td><td>` +
+          `<select class="pnet">${netOptions(pn.net)}</select><div class="row2"><select class="pconf">${confOptions(pn.conf)}</select></div>` +
+          `<input type="text" class="pev" placeholder="Evidence (photo, measurement…)" value="${esc(pn.evidence)}"></td></tr>`;
+      }).join('');
+      const sides = Object.keys(D.photos).map(side => p.box && p.box[side]
+        ? `<button data-boxdel="${side}" class="danger">Remove from ${side}</button>`
+        : `<button data-boxadd="${side}">Add box on ${side}</button>`).join('');
+      const boxEdited = ann.boxes && ann.boxes[ref];
+      body = `<h3>Box</h3><p class="ev">Drag the box to move it, its corners to resize.${boxEdited ? ' <span class="edited">edited</span>' : ''}</p>${sides}` +
+        (boxEdited ? `<button data-boxreset>Reset to model.yaml</button>` : '') +
+        `<h3>Pins</h3><table><tr><th>Pin</th><th>Net, confidence, evidence</th></tr>${rows}</table>` +
+        `<p class="ev">Changes apply immediately. “(unknown)” removes the pin from its net.</p>`;
+    } else {
+      const rows = Object.entries(p.pins).map(([num, name]) => {
+        const pn = pinNet[`${ref}.${num}`];
+        if (pn && enabled.has(pn.conf))
+          return `<tr><td>${esc(num)}</td><td>${esc(name)}</td><td><a data-net="${esc(pn.net)}">${esc(pn.net)}</a> ${chip(pn.conf)}</td></tr>`;
+        return `<tr><td>${esc(num)}</td><td>${esc(name)}</td><td class="muted">${pn ? 'hidden by filter' : 'unknown'}</td></tr>`;
+      }).join('');
+      body = `<table><tr><th>Pin</th><th>Name</th><th>Net</th></tr>${rows}</table><p class="ev">Teal: this part. Amber: parts sharing a net with it.</p>`;
+    }
     $('#detail').innerHTML = `<h3>Part</h3><h2 style="margin:0 0 4px">${esc(p.label || ref)}</h2>` +
-      `<p><b>${esc(p.value)}</b>${p.package ? ' · ' + esc(p.package) : ''}<br><span class="muted">Block: ${esc(M.blocks[p.group].title)}` +
+      `<p><b>${esc(p.value)}</b>${p.package ? ' · ' + esc(p.package) : ''}<br><span class="muted">Block: ${esc(D.blocks[p.group].title)}` +
       `${p.label ? ' · ref ' + esc(ref) : ''}</span></p>` +
       (p.note ? `<div class="note">${esc(p.note)}</div>` : '') +
-      (p.pinout_source ? `<p class="ev">Pinout: ${esc(p.pinout_source)}</p>` : '') +
-      `<table><tr><th>Pin</th><th>Name</th><th>Net</th></tr>${rows}</table>` +
-      `<p class="ev">Teal: this part. Amber: parts sharing a net with it.</p>` +
-      qList(questionsFor(r => r === ref));
-    wireLinks(); renderLists();
+      (p.pinout_source ? `<p class="ev">Pinout: ${esc(p.pinout_source)}</p>` : '') + body + qList(questionsFor(r => r === ref));
+    wireLinks();
+    if (editing) wirePartEditor(ref);
+    renderLists();
+  }
+  function wirePartEditor(ref) {
+    const det = $('#detail');
+    det.querySelectorAll('tr[data-pin]').forEach(tr => {
+      const pin = tr.dataset.pin;
+      const save = () => {
+        let net = tr.querySelector('.pnet').value;
+        if (net === '__new__') {
+          net = (prompt('Name of the new net:') || '').trim();
+          if (!net) { selectPart(ref); return; }
+        }
+        const conf = tr.querySelector('.pconf').value, ev = tr.querySelector('.pev').value.trim();
+        mutate(() => setConnection(ref, pin, net || null, conf, ev));
+      };
+      tr.querySelector('.pnet').onchange = save;
+      tr.querySelector('.pconf').onchange = save;
+      tr.querySelector('.pev').onchange = save;
+    });
+    det.querySelectorAll('[data-boxdel]').forEach(b => b.onclick = () => mutate(() => setBox(ref, b.dataset.boxdel, null)));
+    det.querySelectorAll('[data-boxadd]').forEach(b => b.onclick = () => {
+      const ph = D.photos[b.dataset.boxadd], cx = Math.round(ph.w / ph.scale / 2), cy = Math.round(ph.h / ph.scale / 2), h = Math.round(40 / ph.scale);
+      mutate(() => setBox(ref, b.dataset.boxadd, [cx - h, cy - h, cx + h, cy + h]));
+    });
+    det.querySelectorAll('[data-boxreset]').forEach(b => b.onclick = () => mutate(a => { delete a.boxes[ref]; }));
+  }
+
+  function selectTrace(id) {
+    const t = M.traces.find(x => x.id === id);
+    if (!t) return clear();
+    current = {trace: id};
+    const colors = {};
+    if (M.nets[t.net]) for (const n of M.nets[t.net].nodes) colors[n.ref] = C[n.conf].color;
+    highlight(colors, null, id);
+    const valid = !!M.nets[t.net];
+    $('#detail').innerHTML = `<h3>Trace</h3><h2 style="margin:0 0 4px">${esc(id)}</h2>` +
+      (editing
+        ? `<p>Net <select id="tnet">${netOptions(t.net)}</select></p>` +
+          `<p>Evidence <input type="text" id="tev" value="${esc(t.evidence || '')}" placeholder="Which photo shows this copper"></p>` +
+          `<p class="ev">${t.side} side · ${t.points.length} points. Drag a point to move it, drag a small square to add one, Alt-click (or right-click) a point to delete it.</p>` +
+          `<button id="textend">Extend from the last point</button><button id="tdel" class="danger">Delete trace</button>`
+        : `<p>Net <a data-net="${esc(t.net)}">${esc(t.net)}</a> · ${t.side} side · ${t.points.length} points</p><p class="ev">${esc(t.evidence || '')}</p>` +
+          `<p class="ev">Use “Edit annotations” to change it.</p>`) +
+      (valid ? '' : `<p class="note">Net ${esc(t.net)} does not exist: pick one, or the build will refuse this trace.</p>`);
+    wireLinks();
+    if (editing) {
+      $('#tnet').onchange = e => {
+        let net = e.target.value;
+        if (net === '__new__') net = (prompt('Name of the new net (it needs at least one pin before the build accepts it):') || '').trim();
+        if (!net) { selectTrace(id); return; }
+        mutate(a => { a.traces.find(x => x.id === id).net = net; });
+      };
+      $('#tev').onchange = e => mutate(a => { a.traces.find(x => x.id === id).evidence = e.target.value.trim(); });
+      $('#tdel').onclick = () => { if (confirm(`Delete trace ${id}?`)) deleteTrace(id); };
+      $('#textend').onclick = () => { setTool('draw'); draft = {side: t.side, points: [], extend: id}; $('#finish').hidden = false; drawOverlays(); };
+    }
+    renderLists();
   }
 
   function wireLinks() {
     $('#detail').querySelectorAll('a[data-net]').forEach(a => a.onclick = () => selectNet(a.dataset.net));
     $('#detail').querySelectorAll('a[data-ref]').forEach(a => a.onclick = () => selectPart(a.dataset.ref));
+    $('#detail').querySelectorAll('a[data-trace]').forEach(a => a.onclick = () => selectTrace(a.dataset.trace));
   }
-  function reselect() { if (!current) return; current.net ? selectNet(current.net) : selectPart(current.ref); }
+  function reselect() {
+    if (!current) return;
+    if (current.net) selectNet(current.net); else if (current.ref) selectPart(current.ref); else if (current.trace) selectTrace(current.trace);
+  }
   function clear() {
-    current = null; highlight(null); renderLists();
-    $('#detail').innerHTML = '<h3>Details</h3><p class="muted">Select a net or a part.</p>' +
-      '<h3>Confidence levels</h3>' + Object.entries(C).sort((a, b) => b[1].rank - a[1].rank)
-        .map(([k, v]) => `<p>${chip(k)} ${esc(v.meaning)}</p>`).join('') +
+    current = null; highlight(null); drawOverlays(); renderLists();
+    $('#detail').innerHTML = '<h3>Details</h3><p class="muted">Select a net, a part or a trace.</p>' +
+      (editing ? '<h3>Editing</h3><p class="ev">Select a part to edit its box and pins, or a trace to reshape it. “Draw trace” adds copper you followed in a photo. ' +
+        'Edits are kept in this browser; export annotations.json and run build.sh to put them in the model.</p>' : '') +
+      '<h3>Confidence levels</h3>' + LEVELS.map(k => `<p>${chip(k)} ${esc(C[k].meaning)}</p>`).join('') +
       '<p class="muted">Pins that are not on any net are <b>unknown</b>, not unconnected.</p>';
   }
   $('#clear').onclick = clear;
 
-  // tabs
+  // ------------------------------------------------------------ tabs, diagram, schematic, questions
   document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
   function showTab(t) {
     document.querySelectorAll('nav button').forEach(x => x.classList.toggle('active', x.dataset.tab === t));
     document.querySelectorAll('main').forEach(x => x.classList.toggle('active', x.id === 'tab-' + t));
   }
-
-  // block diagram: click -> show block's parts on the board
   document.querySelectorAll('.diagram .block').forEach(g => g.addEventListener('click', () => {
     const key = g.dataset.block;
     const refs = Object.keys(M.parts).filter(r => M.parts[r].group === key);
     showTab('board'); current = null; renderLists();
     highlight(Object.fromEntries(refs.map(r => [r, '#0f766e'])));
-    $('#detail').innerHTML = `<h3>Block</h3><h2 style="margin:0 0 4px">${esc(M.blocks[key].title)}</h2>` +
+    $('#detail').innerHTML = `<h3>Block</h3><h2 style="margin:0 0 4px">${esc(D.blocks[key].title)}</h2>` +
       `<ul>${refs.map(r => `<li><a data-ref="${r}">${esc(M.parts[r].label || r)}</a> — ${esc(M.parts[r].value)}</li>`).join('')}</ul>`;
     wireLinks();
   }));
-
-  // schematic zoom
   let z = 1;
   document.querySelectorAll('[data-z]').forEach(b => b.onclick = () => {
     const d = +b.dataset.z; z = d === 0 ? 1 : Math.min(6, Math.max(1, z * (d > 0 ? 1.4 : 1 / 1.4)));
     $('#schem').style.setProperty('--z', z);
   });
-
-  // open questions
-  $('#qs').innerHTML = M.questions.map(q => `<div class="q"><h4>${q.id} · ${esc(q.title)}</h4>` +
-    `<p>Pins: ${q.pins.map(([r, p]) => `<a data-ref="${r}">${esc(M.parts[r].label || r)}.${p}</a>`).join(', ')}</p>` +
+  $('#qs').innerHTML = D.questions.map(q => `<div class="q"><h4>${q.id} · ${esc(q.title)}</h4>` +
+    `<p>Pins: ${q.pins.map(([r, p]) => `<a data-ref="${r}">${esc(D.parts[r].label || r)}.${p}</a>`).join(', ')}</p>` +
     `<p class="muted">Candidates: ${q.candidates.map(esc).join(', ')}</p>` +
     `<p class="check"><b>Check:</b> ${esc(q.check)}</p><p class="muted">${esc(q.why)}</p></div>`).join('');
   $('#qs').querySelectorAll('a[data-ref]').forEach(a => a.onclick = () => { showTab('board'); selectPart(a.dataset.ref); });
 
-  renderLists(); clear();
+  let pz = 1;
+  document.querySelectorAll('[data-pz]').forEach(b => b.onclick = () => {
+    pz = Math.min(4, Math.max(1, pz * (+b.dataset.pz > 0 ? 1.5 : 1 / 1.5)));
+    document.querySelectorAll('.stage').forEach(st => st.style.setProperty('--pz', pz));
+  });
+
+  // test hooks (tests/ui-test.mjs)
+  window.__editor = {
+    exportText, importAnnotations,
+    nets: () => Object.fromEntries(Object.entries(M.nets).map(([n, net]) => [n, net.nodes.map(x => [x.ref, x.pin, x.conf]).sort()])),
+    toScreen: (side, x, y) => { const svg = svgs[side], p = svg.createSVGPoint(); [p.x, p.y] = toView(side, x, y); const q = p.matrixTransform(svg.getScreenCTM()); return {x: q.x, y: q.y}; },
+    state: () => clone(ann),
+  };
+
+  drawOverlays(); renderLists(); clear(); status();
 })();
 </script>
 </body>

@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import base64
+import copy
 import html
 import io
 import json
@@ -34,7 +35,7 @@ from board3d import write_board_3d  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
-PHOTO_WIDTH_PX = 1600
+PHOTO_WIDTH_PX = 2400  # sharp enough to place trace points when zoomed
 NAMESPACE = uuid.UUID("6f1c2a9e-0d5b-4c1e-9a43-7f0e2b8d5c11")
 
 # ----------------------------------------------------------------------------- model
@@ -46,6 +47,71 @@ def load_model(path: Path) -> dict:
         part["pins"] = {str(k): str(v) for k, v in part["pins"].items()}
     for net in model["nets"].values():
         net["nodes"] = [{"ref": n[0], "pin": str(n[1]), "conf": n[2], "evidence": n[3]} for n in net["nodes"]]
+    return model
+
+
+def load_annotations(path: Path) -> dict:
+    """The editor's file (index.html exports it): traces, part-box and connection overrides."""
+    ann = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    return {
+        "version": ann.get("version", 1),
+        "traces": ann.get("traces", []),
+        "boxes": ann.get("boxes", {}),
+        "connections": ann.get("connections", []),
+    }
+
+
+def validate_annotations(base: dict, ann: dict) -> list[str]:
+    errors = []
+    parts, sides, levels = base["parts"], base["photos"], base["confidence"]
+    for t in ann["traces"]:
+        tid = t.get("id", "?")
+        if t.get("side") not in sides:
+            errors.append(f"trace {tid}: unknown side {t.get('side')!r}")
+        if len(t.get("points", [])) < 2:
+            errors.append(f"trace {tid}: needs at least 2 points")
+        if not t.get("net"):
+            errors.append(f"trace {tid}: no net")
+    for ref, by_side in ann["boxes"].items():
+        if ref not in parts:
+            errors.append(f"box override: unknown part {ref}")
+            continue
+        for side, box in by_side.items():
+            if side not in sides:
+                errors.append(f"box override {ref}: unknown side {side!r}")
+            elif box is not None and not (len(box) == 4 and box[0] < box[2] and box[1] < box[3]):
+                errors.append(f"box override {ref}.{side}: expected [x0, y0, x1, y1] with x0 < x1, y0 < y1")
+    for c in ann["connections"]:
+        ref, pin = c.get("ref"), str(c.get("pin"))
+        if ref not in parts or pin not in parts[ref]["pins"]:
+            errors.append(f"connection override: unknown pin {ref}.{pin}")
+        if c.get("net") and c.get("conf") not in levels:
+            errors.append(f"connection override {ref}.{pin}: unknown confidence {c.get('conf')!r}")
+    return errors
+
+
+def apply_annotations(base: dict, ann: dict) -> dict:
+    """The model with the editor's annotations applied. viewer_template.html applies the same rules."""
+    model = copy.deepcopy(base)
+    model["traces"] = [dict(t) for t in ann["traces"]]
+    for ref, by_side in ann["boxes"].items():
+        box = model["parts"][ref].setdefault("box", {})
+        for side, value in by_side.items():
+            if value is None:
+                box.pop(side, None)
+            else:
+                box[side] = list(value)
+    for c in ann["connections"]:
+        ref, pin = c["ref"], str(c["pin"])
+        for net in model["nets"].values():
+            net["nodes"] = [n for n in net["nodes"] if (n["ref"], n["pin"]) != (ref, pin)]
+        if c.get("net"):
+            net = model["nets"].setdefault(c["net"], {"description": "Added in the editor.", "nodes": []})
+            net["nodes"].append({"ref": ref, "pin": pin, "conf": c["conf"], "evidence": c.get("evidence", "")})
+    model["nets"] = {name: net for name, net in model["nets"].items() if net["nodes"]}
+    for t in model["traces"]:
+        if t["net"] not in model["nets"]:
+            model.setdefault("_errors", []).append(f"trace {t.get('id', '?')}: net {t['net']!r} does not exist")
     return model
 
 
@@ -392,8 +458,8 @@ def schematic(model: dict) -> tuple[str, tuple[float, float, float, float]]:
         and (r, p) not in wired
         and sum(1 for (n2, c2) in nets_of.values() if n2 == net and rank[c2] >= VERIFIED_RANK) > 1
     ]
-    if missing:
-        raise ValueError(f"verified connections without a wire in schematic_layout: {', '.join(sorted(missing))}")
+    if missing:  # labelled instead; add a wire to schematic_layout to draw them
+        print(f"warning: verified connections without a wire in schematic_layout: {', '.join(sorted(missing))}")
 
     labels = []
     # A wired net is named once: on its board pad if it has one, else above its longest horizontal wire.
@@ -592,7 +658,8 @@ def photo_data_uri(rel_path: str) -> tuple[str, float]:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(), scale
 
 
-def write_html(model: dict, diagram_svg: str, drawn: tuple, path: Path) -> None:
+def write_html(model: dict, diagram_svg: str, drawn: tuple, path: Path, base: dict, annotations: dict) -> None:
+    """index.html gets the base model and the annotations separately: its editor applies and edits them."""
     photos = {}
     for side, info in model["photos"].items():
         uri, scale = photo_data_uri(info["file"])
@@ -607,9 +674,9 @@ def write_html(model: dict, diagram_svg: str, drawn: tuple, path: Path) -> None:
     data = {
         "board": model["board"],
         "confidence": model["confidence"],
-        "parts": model["parts"],
-        "nets": model["nets"],
-        "netConfidence": {n: net_confidence(model, net) for n, net in model["nets"].items()},
+        "parts": base["parts"],
+        "nets": base["nets"],
+        "annotations": annotations,
         "questions": model["open_questions"],
         "blocks": model["blocks"],
         "photos": {k: {kk: vv for kk, vv in v.items() if kk != "uri"} for k, v in photos.items()},
@@ -651,11 +718,16 @@ HTML_TEMPLATE = (
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", type=Path, default=HERE / "model.yaml")
+    parser.add_argument("--annotations", type=Path, default=HERE / "annotations.json")
     parser.add_argument("--check-netlist", type=Path, help="kicad-cli netlist to compare")
+    parser.add_argument("--dump-nets", action="store_true", help="print the merged nets as JSON and stop")
     args = parser.parse_args()
 
-    model = load_model(args.model)
-    errors = validate(model)
+    base = load_model(args.model)
+    annotations = load_annotations(args.annotations)
+    errors = validate_annotations(base, annotations)
+    model = apply_annotations(base, annotations) if not errors else base
+    errors += model.pop("_errors", []) + validate(model)
     if errors:
         print("model errors:\n  " + "\n  ".join(errors))
         return 1
@@ -663,6 +735,13 @@ def main() -> int:
         problems = check_netlist(model, args.check_netlist)
         print("\n".join(problems) or f"KiCad netlist matches the model ({len(model['nets'])} nets)")
         return 1 if problems else 0
+    if args.dump_nets:
+        print(
+            json.dumps(
+                {n: sorted([x["ref"], x["pin"], x["conf"]] for x in net["nodes"]) for n, net in model["nets"].items()}
+            )
+        )
+        return 0
 
     write_netlist_md(model, HERE / "netlist.md")
     diagram = block_diagram_svg(model)
@@ -672,7 +751,7 @@ def main() -> int:
     if not HTML_TEMPLATE:
         print("viewer_template.html missing")
         return 1
-    write_html(model, diagram, drawn, HERE / "index.html")
+    write_html(model, diagram, drawn, HERE / "index.html", base, annotations)
     data3d = {
         "confidence": model["confidence"],
         "parts": model["parts"],

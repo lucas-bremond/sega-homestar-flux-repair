@@ -15,17 +15,18 @@ The header checkboxes hide connections by confidence level. For example, untick 
 
 ## Files
 
-| File                                                                                                                     | What it is                                                                                     |
-| ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| [`model.yaml`](model.yaml)                                                                                               | **Source of truth:** parts, pins, nets, confidence and evidence per connection, open questions |
-| [`netlist.md`](netlist.md)                                                                                               | Generated tables: nets, evidence, open questions, parts, and a Mermaid block diagram           |
-| [`block-diagram.svg`](block-diagram.svg)                                                                                 | Generated block diagram                                                                        |
-| [`pcb-model.kicad_sch`](pcb-model.kicad_sch)                                                                             | Generated KiCad schematic: wires for verified connections, coloured labels for the rest        |
-| [`schematic.svg`](schematic.svg)                                                                                         | The schematic exported by `kicad-cli` (embedded in `index.html`)                               |
-| [`index.html`](index.html)                                                                                               | Generated viewer                                                                               |
-| [`board-3d.html`](board-3d.html)                                                                                         | Generated 3D view (see [3D view](#3d-view))                                                    |
-| [`build.py`](build.py), [`build.sh`](build.sh), [`viewer_template.html`](viewer_template.html)                           | Generator, full build with KiCad checks, viewer template                                       |
-| [`board3d.py`](board3d.py), [`viewer3d_template.html`](viewer3d_template.html), [`vendor/`](vendor/three-0.170.0/README) | 3D geometry and page, and the vendored three.js 0.170.0 (MIT)                                  |
+| File                                                                                                                     | What it is                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| [`model.yaml`](model.yaml)                                                                                               | **Source of truth:** parts, pins, nets, confidence and evidence per connection, open questions                                      |
+| [`annotations.json`](annotations.json)                                                                                   | Edits from the viewer's editor, applied on top of `model.yaml`: traces, part-box and connection overrides (see [Editing](#editing)) |
+| [`netlist.md`](netlist.md)                                                                                               | Generated tables: nets, evidence, open questions, parts, and a Mermaid block diagram                                                |
+| [`block-diagram.svg`](block-diagram.svg)                                                                                 | Generated block diagram                                                                                                             |
+| [`pcb-model.kicad_sch`](pcb-model.kicad_sch)                                                                             | Generated KiCad schematic: wires for verified connections, coloured labels for the rest                                             |
+| [`schematic.svg`](schematic.svg)                                                                                         | The schematic exported by `kicad-cli` (embedded in `index.html`)                                                                    |
+| [`index.html`](index.html)                                                                                               | Generated viewer                                                                                                                    |
+| [`board-3d.html`](board-3d.html)                                                                                         | Generated 3D view (see [3D view](#3d-view))                                                                                         |
+| [`build.py`](build.py), [`build.sh`](build.sh), [`viewer_template.html`](viewer_template.html)                           | Generator, full build with KiCad checks, viewer template                                                                            |
+| [`board3d.py`](board3d.py), [`viewer3d_template.html`](viewer3d_template.html), [`vendor/`](vendor/three-0.170.0/README) | 3D geometry and page, and the vendored three.js 0.170.0 (MIT)                                                                       |
 
 ## 3D view
 
@@ -81,6 +82,23 @@ New facts from the photos, beyond `REPAIR_LOG.md`:
 
 **Audit (2026-11-08).** Four connections were labelled `photo` on placement alone: C1 to U2 pin 3, C9 to U4 pin 4, R13 to `M-` and R3 to `SSL-`. They are now `assumed`, and only connections backed by a followed trace, copper area or soldered wire count as verified.
 
+## Editing
+
+`index.html` has an editor for the annotations. Click **✎ Edit annotations** on the Board tab:
+
+- **Draw trace:** click points along copper you can follow in a photo, then double-click, press Enter or click **Finish trace**. The trace takes the selected net; change it and add its evidence in the side panel.
+- **Select / move:**
+  - **Traces:** select one to drag its points. Drag a small square to insert a point; Alt-click or right-click a point to delete it. **Extend** adds points at the end, and Delete removes the trace.
+  - **Parts:** select one to drag its box or resize it by the corners, add or remove its box on either photo, and edit each pin's net, confidence and evidence. For example, record a meter check by setting the pin's confidence to `measured`. "(unknown)" takes the pin off its net, and "New net…" creates a net.
+- **Undo** (Ctrl+Z) steps back one edit.
+- **Saving:** edits are kept in the browser (localStorage) and restored on reload.
+
+Edits stay in the browser until you build them. **Export annotations.json**, save it over `analysis/pcb-model/annotations.json`, and run `./build.sh`. That regenerates the netlist, the schematic and both viewers. The build checks the file first: unknown parts or pins, traces on nets that don't exist, malformed boxes and invalid confidence levels are refused.
+
+A connection promoted to `photo` or better without a wire in `schematic_layout` gets a build warning and a label in the schematic. Add it to `schematic_layout` to draw it as a wire. **Import…** loads an `annotations.json` back into the editor.
+
+`model.yaml` is never edited by the page, so its comments and hand-written structure stay intact. The editor and `build.py` apply annotations by the same rules: the 2D test exports a set of edits, and `tests/check_editor_consistency.py` checks that the build derives the same nets from it as the page.
+
 ## Schematic
 
 `pcb-model.kicad_sch` draws a **wire** only for a verified connection (`photo`, `confirmed` or `measured`). Everything else keeps a net label coloured by its confidence. Pins with neither a wire nor a label are unknown. The wired clusters are laid out by hand in `schematic_layout` in `model.yaml`:
@@ -128,6 +146,7 @@ Results on 2026-11-07:
   - 55 `lib_symbol_issues`: the symbols are embedded in the schematic rather than in a KiCad library.
   - 1 `label_dangling`: `5WL-`, a net whose only known member is the pad.
 - **3D view:** a headless Chromium test with software WebGL ([`tests/ui3d-test.mjs`](tests/ui3d-test.mjs)) passes 10 checks: the scene renders, the views switch, clicking U4 in the scene selects it, net and question selection light the right parts, `M+` lights only its traced copper, and the trace and enhanced-photo toggles work. No JavaScript errors.
+- **Editor:** the 2D test also drives the editor through 12 more checks: draw a trace, name it, drag a point, move a box, change a connection, undo, export, restore after reload, discard and import. `tests/check_editor_consistency.py` then confirms the build merges the exported file into the same 16 nets as the page.
 - **2D viewer:** a headless Chromium test ([`tests/ui-test.mjs`](tests/ui-test.mjs), run command in its header) passes 14 checks, covering net and part highlighting, the confidence filter, search and all four tabs, with no JavaScript errors.
 
 ## Limits
