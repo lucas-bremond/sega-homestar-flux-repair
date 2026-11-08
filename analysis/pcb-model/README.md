@@ -15,15 +15,38 @@ The header checkboxes hide connections by confidence level. For example, untick 
 
 ## Files
 
-| File                                                                                           | What it is                                                                                     |
-| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| [`model.yaml`](model.yaml)                                                                     | **Source of truth:** parts, pins, nets, confidence and evidence per connection, open questions |
-| [`netlist.md`](netlist.md)                                                                     | Generated tables: nets, evidence, open questions, parts, and a Mermaid block diagram           |
-| [`block-diagram.svg`](block-diagram.svg)                                                       | Generated block diagram                                                                        |
-| [`pcb-model.kicad_sch`](pcb-model.kicad_sch)                                                   | Generated KiCad schematic: one symbol per part, nets as labels coloured by confidence          |
-| [`schematic.svg`](schematic.svg)                                                               | The schematic exported by `kicad-cli` (embedded in `index.html`)                               |
-| [`index.html`](index.html)                                                                     | Generated viewer                                                                               |
-| [`build.py`](build.py), [`build.sh`](build.sh), [`viewer_template.html`](viewer_template.html) | Generator, full build with KiCad checks, viewer template                                       |
+| File                                                                                                                     | What it is                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| [`model.yaml`](model.yaml)                                                                                               | **Source of truth:** parts, pins, nets, confidence and evidence per connection, open questions |
+| [`netlist.md`](netlist.md)                                                                                               | Generated tables: nets, evidence, open questions, parts, and a Mermaid block diagram           |
+| [`block-diagram.svg`](block-diagram.svg)                                                                                 | Generated block diagram                                                                        |
+| [`pcb-model.kicad_sch`](pcb-model.kicad_sch)                                                                             | Generated KiCad schematic: one symbol per part, nets as labels coloured by confidence          |
+| [`schematic.svg`](schematic.svg)                                                                                         | The schematic exported by `kicad-cli` (embedded in `index.html`)                               |
+| [`index.html`](index.html)                                                                                               | Generated viewer                                                                               |
+| [`board-3d.html`](board-3d.html)                                                                                         | Generated 3D view (see [3D view](#3d-view))                                                    |
+| [`build.py`](build.py), [`build.sh`](build.sh), [`viewer_template.html`](viewer_template.html)                           | Generator, full build with KiCad checks, viewer template                                       |
+| [`board3d.py`](board3d.py), [`viewer3d_template.html`](viewer3d_template.html), [`vendor/`](vendor/three-0.170.0/README) | 3D geometry and page, and the vendored three.js 0.170.0 (MIT)                                  |
+
+## 3D view
+
+**Open [`board-3d.html`](board-3d.html)** in a browser (self-contained, works offline, needs WebGL).
+
+- **What it shows:** the board with both photos mapped onto its faces, and every modelled part as a simple 3D body on its side of the board. Wires leave their pads in their real colours.
+- **Controls:** drag to orbit, scroll to zoom, right-drag to pan. **Top**, **Bottom** and **3D** set the view; **X-ray board** makes the board see-through, which is useful for nets that cross sides.
+- **Selection:**
+  - Click a part, or pick a net, part or open question in the side panel.
+  - A net draws lines joining its parts (the shortest tree through them), each coloured by the weaker end's confidence. These lines show the model's connections, **not the copper route**.
+  - An open question highlights the parts to probe.
+
+How it is built (`board3d.py`, from the `geometry` section of `model.yaml`):
+
+- **Frame:** `bottom-1.jpg` is close to straight-on, so it defines the board frame: one scale, plus a top-to-bottom mirror, because the board was flipped about its long axis between the photos.
+- **Outline:** segmented from the green board in `bottom-1.jpg`.
+- **Top photo:** `top-1.jpg` is taken at an angle. It maps to the frame by a homography fitted on 13 points visible on both photos (wire-lead holes and mounting holes). 12 of them fit within 0.6 mm; the worst, `DC-`, is off by 1.2 mm. The build prints these residuals.
+- **Scale:** 17.9 px/mm on `bottom-1.jpg`, from U3's and U2's package dimensions. That makes the board **96 × 47 mm, about ±5 %**. To use a measurement instead, set `geometry.board_width_mm` to the measured width of the outline (left to right) and rebuild.
+- **Bodies:** sized from each part's kind, package and photo box. Heights are typical values for the package, not measurements. Tall parts are placed at the base of their photo box, because they lean in the angled photo.
+
+Accuracy: positions are within about 1–2 mm, and heights are estimates. Treat it as a map for finding parts and probe points, not as a mechanical model.
 
 ## Confidence levels
 
@@ -68,7 +91,7 @@ To record a result, change that connection's confidence in `model.yaml` to `meas
 ## Build and checks
 
 ```sh
-./build.sh                  # needs Python with PyYAML and Pillow, and Docker
+./build.sh                  # needs Python with PyYAML, Pillow and NumPy, and Docker
 python -I build.py          # outputs only, without the KiCad steps
 ```
 
@@ -81,7 +104,8 @@ Results on 2026-11-07:
   - 88 `pin_not_connected`: exactly the 88 unknown pins.
   - 55 `lib_symbol_issues`: the symbols are embedded in the schematic rather than in a KiCad library.
   - 1 `label_dangling`: `5WL-`, a net whose only known member is the pad.
-- **Viewer:** a headless Chromium test ([`tests/ui-test.mjs`](tests/ui-test.mjs), run command in its header) passes 14 checks, covering net and part highlighting, the confidence filter, search and all four tabs, with no JavaScript errors.
+- **3D view:** a headless Chromium test with software WebGL ([`tests/ui3d-test.mjs`](tests/ui3d-test.mjs)) passes 7 checks: the scene renders, the views switch, clicking U4 in the scene selects it, and net and question selection light the right parts. No JavaScript errors.
+- **2D viewer:** a headless Chromium test ([`tests/ui-test.mjs`](tests/ui-test.mjs), run command in its header) passes 14 checks, covering net and part highlighting, the confidence filter, search and all four tabs, with no JavaScript errors.
 
 ## Limits
 

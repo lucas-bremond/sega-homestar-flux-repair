@@ -1,0 +1,5 @@
+three.js 0.170.0 (MIT, see LICENSE), from the npm package three@0.170.0
+(sha256 of three-0.170.0.tgz: 4a608a355dcaba72e0e5383cdc814303f5b6060b43c238cdf6932dceb699238d).
+Files: build/three.module.min.js and examples/jsm/controls/OrbitControls.js, unmodified.
+Pinned to 0.170: from r171 the module build is split into two files, which cannot be inlined in one page.
+Embedded into board-3d.html by build.py.

@@ -50,6 +50,7 @@ parts:
   # ---- wire pads ------------------------------------------------------------
   J_DCP:
     kind: pad
+    wire: red
     label: DC+
     value: "5 V input +"
     group: input
@@ -58,6 +59,7 @@ parts:
     box: { top: [3355, 1650, 3470, 1765], bottom: [1615, 680, 1690, 755] }
   J_DCN:
     kind: pad
+    wire: black
     label: DC-
     value: "5 V input −"
     group: input
@@ -66,6 +68,7 @@ parts:
     box: { top: [3020, 1865, 3140, 1985], bottom: [1405, 495, 1470, 555] }
   J_R1B:
     kind: pad
+    wire: yellow
     label: R1B
     value: "unknown input"
     group: input
@@ -74,6 +77,7 @@ parts:
     box: { top: [3200, 1765, 3310, 1875], bottom: [1530, 555, 1665, 680] }
   J_MP:
     kind: pad
+    wire: red
     label: M+
     value: "motor +"
     group: motor
@@ -82,6 +86,7 @@ parts:
     box: { top: [720, 1850, 840, 1970], bottom: [173, 569, 223, 619] }
   J_MN:
     kind: pad
+    wire: black
     label: M-
     value: "motor −"
     group: motor
@@ -90,6 +95,7 @@ parts:
     box: { top: [1120, 2090, 1240, 2210], bottom: [390, 425, 445, 480] }
   J_SSLP:
     kind: pad
+    wire: orange
     label: SSL+
     value: "shooting-star LED +"
     group: shooting_star
@@ -98,6 +104,7 @@ parts:
     box: { top: [1780, 1990, 1900, 2110], bottom: [745, 470, 805, 525] }
   J_SSLN:
     kind: pad
+    wire: brown
     label: SSL-
     value: "shooting-star LED −"
     group: shooting_star
@@ -106,6 +113,7 @@ parts:
     box: { top: [1595, 2090, 1715, 2210], bottom: [625, 425, 690, 480] }
   J_5WLP:
     kind: pad
+    wire: red
     label: 5WL+
     value: "5 W LED +"
     group: main_led
@@ -114,6 +122,7 @@ parts:
     box: { top: [2680, 2000, 2800, 2115], bottom: [1065, 550, 1120, 620] }
   J_5WLN:
     kind: pad
+    wire: black
     label: 5WL-
     value: "5 W LED −"
     group: main_led
@@ -293,7 +302,7 @@ parts:
     group: main_led
     pins: { 1: "1", 2: "2" }
     note: Shielded power inductor; probably the LED driver's inductor. Silkscreen reference hidden.
-    box: { top: [1996, 1251, 2048, 1744] }
+    box: { top: [2030, 1260, 2485, 1732] }
   C11:
     kind: electrolytic
     value: "100 µF 16 V"
@@ -431,6 +440,107 @@ parts:
     group: front_panel
     pins: { 1: K, 2: A }
     box: { top: [2290, 560, 2430, 880] }
+
+# 3D geometry, for board-3d.html. The board frame is the TOP view in millimetres, origin at the
+# outline's top-left, x to the right, y down. It comes from bottom-1.jpg, which is close to
+# straight-on: board = ((x - x0) / scale, (y1 - y) / scale), mirrored top-to-bottom because the
+# board was flipped about its long axis between the two photos.
+geometry:
+  bottom_px_per_mm: 17.9   # from U3 (ESOP-8: 3.81 mm pin 1 to 4, 3.9 mm body) and U2 (SOT-89: 4.5 mm body, 1.5 mm pitch); about ±5 %
+  board_width_mm: null     # set to a measured width (outline's left-right extent) to override the scale
+  bottom_x0: 51            # bottom-1 px of the outline's left edge
+  bottom_y1: 1204          # bottom-1 px of the outline's bottom edge (the top view's top edge)
+  thickness_mm: 1.6        # assumed (standard)
+  # Board outline in bottom-1 px: green-mask segmentation, closed and simplified (OpenCV approxPolyDP, 4 px).
+  outline_bottom_px: [
+    [52, 732],
+    [51, 763],
+    [132, 857],
+    [235, 948],
+    [247, 976],
+    [263, 980],
+    [293, 1009],
+    [326, 1012],
+    [499, 1109],
+    [606, 1146],
+    [703, 1173],
+    [888, 1202],
+    [1037, 1203],
+    [1156, 1186],
+    [1319, 1145],
+    [1429, 1100],
+    [1509, 1058],
+    [1537, 1058],
+    [1599, 1014],
+    [1612, 991],
+    [1684, 938],
+    [1705, 915],
+    [1710, 893],
+    [1739, 880],
+    [1767, 851],
+    [1766, 789],
+    [1727, 756],
+    [1710, 726],
+    [1706, 682],
+    [1715, 645],
+    [1602, 557],
+    [1589, 535],
+    [1578, 531],
+    [1567, 515],
+    [1554, 511],
+    [1521, 483],
+    [1499, 477],
+    [1417, 414],
+    [1256, 403],
+    [1185, 448],
+    [1123, 475],
+    [1032, 495],
+    [936, 496],
+    [860, 483],
+    [783, 455],
+    [699, 404],
+    [652, 362],
+    [577, 354],
+    [466, 356],
+    [420, 385],
+    [397, 391],
+    [383, 406],
+    [310, 439],
+    [281, 463],
+    [249, 470],
+    [237, 487],
+    [135, 549],
+    [128, 556],
+    [135, 587],
+    [129, 634],
+    [92, 682],
+    [59, 705]
+  ]
+  # Points visible on both photos (wire-lead holes and mounting holes): [top-1 px, bottom-1 px].
+  # They fit the top-1 -> board homography; build.py prints the residual of each.
+  top_points:
+    M+: [[800, 1923], [209, 568]]
+    M-: [[1186, 2145], [421, 448]]
+    hole_by_M-: [[1418, 2177], [541, 430]]
+    SSL-: [[1668, 2145], [671, 449]]
+    SSL+: [[1840, 2026], [765, 501]]
+    hole_centre: [[2161, 1789], [944, 618]]
+    5WL-: [[2250, 1925], [988, 551]]
+    5WL+: [[2750, 2046], [1255, 475]]
+    DC-: [[3087, 1940], [1457, 505]]
+    R1B: [[3267, 1813], [1560, 590]]
+    DC+: [[3423, 1687], [1635, 660]]
+    ear_right: [[3567, 1420], [1733, 813]]
+    hole_by_SW1: [[1660, 983], [673, 1073]]
+  # 3D bodies: default sizes come from each part's kind and package (build.py); these override them.
+  # d = diameter, h = height above the board, at = footprint centre [x, y] in board mm. All estimated.
+  bodies:
+    C3: { d: 10, h: 13 }
+    C2: { d: 6.3, h: 9 }
+    C7: { d: 5, h: 11 }
+    C11: { d: 6.3, h: 11 }
+    L_102: { h: 7 }
+    L_QC06: { h: 6 }
 
 # Each node is [part, pin, confidence, evidence].
 nets:

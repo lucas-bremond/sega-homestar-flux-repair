@@ -5,6 +5,7 @@ Outputs, all written next to this script:
     block-diagram.svg    block diagram with confidence-coloured links
     pcb-model.kicad_sch  KiCad schematic (one symbol per part, nets as labels)
     index.html           self-contained viewer (photos, nets, diagram, schematic)
+    board-3d.html        self-contained 3D view (three.js 0.170, vendored), via board3d.py
 
 The schematic SVG embedded in index.html (schematic.svg) and the KiCad netlist
 used by --check-netlist are exported by kicad-cli; see README.md.
@@ -27,6 +28,9 @@ from pathlib import Path
 
 import yaml
 from PIL import Image, ImageOps
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from board3d import write_board_3d  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -543,6 +547,17 @@ def main() -> int:
         print("viewer_template.html missing")
         return 1
     write_html(model, diagram, drawn, HERE / "index.html")
+    data3d = {
+        "confidence": model["confidence"],
+        "parts": model["parts"],
+        "nets": model["nets"],
+        "netConfidence": {n: net_confidence(model, net) for n, net in model["nets"].items()},
+        "questions": model["open_questions"],
+        "blocks": model["blocks"],
+    }
+    residuals = write_board_3d(model, data3d, HERE, REPO, HERE / "board-3d.html")
+    worst = max(residuals, key=residuals.get)
+    print(f"3D: top photo fit on {len(residuals)} points, worst {worst} {residuals[worst]:.2f} mm")
     n_pins = sum(len(p["pins"]) for p in model["parts"].values())
     n_known = len(pin_nets(model))
     print(

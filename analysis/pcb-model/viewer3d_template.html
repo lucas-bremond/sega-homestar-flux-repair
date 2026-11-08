@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ — 3D model</title>
+<style>
+  :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --accent:#0f766e; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--ink); background:#f8fafc; }
+  body { display:grid; grid-template-rows:auto 1fr; }
+  header { padding:10px 16px; background:#0f172a; color:#f8fafc; display:flex; flex-wrap:wrap; gap:6px 18px; align-items:center; }
+  header h1 { font-size:16px; margin:0; font-weight:600; }
+  header .sub { color:#cbd5e1; font-size:12px; }
+  header a { color:#5eead4; }
+  .legend { display:flex; gap:9px; flex-wrap:wrap; margin-left:auto; }
+  .legend label { display:flex; align-items:center; gap:4px; font-size:12px; cursor:pointer; color:#e2e8f0; }
+  .chip { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11.5px; color:#fff; white-space:nowrap; }
+  .main { display:grid; grid-template-columns:250px 1fr 330px; min-height:0; }
+  .side, .detail { background:#fff; border-right:1px solid var(--line); padding:10px; overflow:auto; }
+  .detail { border-right:0; border-left:1px solid var(--line); }
+  h3 { margin:8px 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  input[type=search] { width:100%; padding:6px 8px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+  .list { list-style:none; margin:0 0 8px; padding:0; }
+  .list li { padding:3px 6px; border-radius:5px; cursor:pointer; display:flex; justify-content:space-between; gap:6px; align-items:center; }
+  .list li:hover { background:#f1f5f9; } .list li.sel { background:#ccfbf1; }
+  .list li .n { color:var(--muted); font-size:12px; }
+  .stage { position:relative; min-width:0; min-height:0; overflow:hidden; background:radial-gradient(#f1f5f9, #cbd5e1); }
+  .stage canvas { display:block; width:100%; height:100%; }
+  .toolbar { position:absolute; top:10px; left:10px; display:flex; gap:6px; flex-wrap:wrap; z-index:2; }
+  .toolbar button, .toolbar label { font:inherit; font-size:13px; padding:4px 10px; border:1px solid #cbd5e1; background:rgba(255,255,255,.92); border-radius:6px; cursor:pointer; }
+  .toolbar label { display:flex; gap:4px; align-items:center; }
+  .note { position:absolute; bottom:8px; left:10px; right:10px; font-size:12px; color:#334155; background:rgba(255,255,255,.85); padding:4px 8px; border-radius:6px; pointer-events:none; }
+  .labels { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+  .lbl { position:absolute; transform:translate(-50%, -120%); font:600 11.5px system-ui; color:#fff; background:rgba(15,23,42,.8); padding:1px 5px; border-radius:4px; white-space:nowrap; }
+  .lbl.hit { background:#0f766e; }
+  .tip { position:absolute; pointer-events:none; background:#0f172a; color:#fff; font-size:12px; padding:3px 7px; border-radius:5px; display:none; z-index:3; }
+  .detail table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  .detail td, .detail th { border-bottom:1px solid var(--line); padding:4px; text-align:left; vertical-align:top; }
+  .ev { color:var(--muted); font-size:12px; } .muted { color:var(--muted); }
+  .detail a { color:var(--accent); cursor:pointer; text-decoration:underline; }
+  .box { background:#fefce8; border:1px solid #fde68a; padding:6px 8px; border-radius:6px; font-size:12.5px; margin:6px 0; }
+  .err { padding:30px; color:#b91c1c; }
+  @media (max-width: 1100px) { .main { grid-template-columns:1fr; grid-auto-rows:minmax(420px, auto); } }
+</style>
+<script type="importmap">{"imports":{"three":"__THREE_URI__","three/addons/controls/OrbitControls.js":"__ORBIT_URI__"}}</script>
+</head>
+<body>
+<header>
+  <div>
+    <h1>__TITLE__ — 3D model</h1>
+    <div class="sub" id="sub"></div>
+  </div>
+  <a href="index.html">2D viewer</a>
+  <div class="legend" id="legend" title="Show connections at these confidence levels"></div>
+</header>
+<div class="main">
+  <aside class="side">
+    <input type="search" id="search" placeholder="Filter nets and parts…" aria-label="Filter nets and parts">
+    <h3>Open questions</h3><ul class="list" id="qs"></ul>
+    <h3>Nets</h3><ul class="list" id="nets"></ul>
+    <h3>Parts</h3><ul class="list" id="parts"></ul>
+  </aside>
+  <div class="stage" id="stage">
+    <div class="toolbar">
+      <button data-view="iso">3D</button><button data-view="top">Top</button><button data-view="bottom">Bottom</button>
+      <label><input type="checkbox" id="xray"> X-ray board</label>
+      <label><input type="checkbox" id="alllabels"> All labels</label>
+      <button id="clear">Clear</button>
+    </div>
+    <div class="labels" id="labels"></div>
+    <div class="tip" id="tip"></div>
+    <div class="note" id="note"></div>
+  </div>
+  <aside class="detail" id="detail"></aside>
+</div>
+<script id="model" type="application/json">__DATA__</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const M = JSON.parse(document.getElementById('model').textContent);
+const C = M.confidence, rank = k => C[k].rank;
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const chip = k => `<span class="chip" style="background:${C[k].color}">${k}</span>`;
+const enabled = new Set(Object.keys(C));
+const pinNet = {};
+for (const [name, net] of Object.entries(M.nets)) for (const n of net.nodes) pinNet[`${n.ref}.${n.pin}`] = {net: name, conf: n.conf};
+
+const B = M.board, T = B.thickness;
+$('#sub').textContent = `${B.marking} · ${B.width.toFixed(0)} × ${B.height.toFixed(0)} mm (scale from ${B.scale_source}) · photo fit within ${B.max_residual_mm} mm`;
+$('#note').textContent = 'Approximate model from photos: positions ±1–2 mm, heights estimated. Coloured lines join parts on the selected net (a ratsnest of the model, not copper traces). Drag to orbit, scroll to zoom, right-drag to pan.';
+
+// ---------------------------------------------------------------- scene
+const stage = $('#stage');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({antialias: true, alpha: true}); renderer.setClearColor(0x000000, 0); }
+catch (e) { stage.innerHTML = '<p class="err">WebGL is not available in this browser, so the 3D view cannot run. Use index.html (2D viewer).</p>'; throw e; }
+renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 0.5, 2000);
+camera.up.set(0, 0, 1);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x94a3b8, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(-60, -80, 150); scene.add(sun);
+const under = new THREE.DirectionalLight(0xffffff, 0.9); under.position.set(40, 60, -150); scene.add(under);
+
+const W = B.width, H = B.height;
+const P = (x, y) => new THREE.Vector2(x - W / 2, -(y - H / 2));   // board mm (y down) -> scene (y up)
+const shape = new THREE.Shape(B.outline.map(([x, y]) => P(x, y)));
+const boardMats = [];
+const sideMat = new THREE.MeshStandardMaterial({color: 0x166534, roughness: .8});
+const ext = new THREE.ExtrudeGeometry(shape, {depth: T, bevelEnabled: false});
+ext.translate(0, 0, -T / 2);
+const board = new THREE.Mesh(ext, [new THREE.MeshBasicMaterial({visible: false}), sideMat]);
+scene.add(board); boardMats.push(sideMat);
+const loader = new THREE.TextureLoader();
+function face(uri, z, side) {
+  const g = new THREE.ShapeGeometry(shape, 64);
+  const pos = g.attributes.position, uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) { uv[2 * i] = (pos.getX(i) + W / 2) / W; uv[2 * i + 1] = (pos.getY(i) + H / 2) / H; }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  const tex = loader.load(uri); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const m = new THREE.MeshStandardMaterial({map: tex, roughness: .85, side});
+  boardMats.push(m);
+  const mesh = new THREE.Mesh(g, m); mesh.position.z = z; scene.add(mesh); return mesh;
+}
+face(M.textures.top, T / 2 + 0.01, THREE.FrontSide);
+face(M.textures.bottom, -T / 2 - 0.01, THREE.BackSide);
+
+// ---------------------------------------------------------------- parts
+const groups = {}, anchors = {};
+const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({color, roughness: .55, metalness: .1, ...extra});
+function addMesh(group, geo, m, z) { const mesh = new THREE.Mesh(geo, m); mesh.position.z = z; group.add(mesh); return mesh; }
+for (const [ref, p] of Object.entries(M.parts3d)) {
+  const b = p.body, s = p.side === 'top' ? 1 : -1, base = s * T / 2;
+  const g = new THREE.Group(); const c = P(p.x, p.y); g.position.set(c.x, c.y, 0);
+  g.userData.ref = ref;
+  let top = b.h || 1;
+  if (b.shape === 'box') addMesh(g, new THREE.BoxGeometry(b.w, b.l, b.h), mat(b.color), base + s * b.h / 2);
+  else if (b.shape === 'cylinder') {
+    const cyl = new THREE.CylinderGeometry(b.d / 2, b.d / 2, b.h, 40); cyl.rotateX(Math.PI / 2);
+    addMesh(g, cyl, mat(b.color), base + s * b.h / 2);
+    const cap = new THREE.CylinderGeometry(b.d / 2 * .92, b.d / 2 * .92, .3, 40); cap.rotateX(Math.PI / 2);
+    addMesh(g, cap, mat('#d4d4d8', {metalness: .6}), base + s * (b.h + .1));
+  } else if (b.shape === 'rod') {
+    const rod = new THREE.CylinderGeometry(b.d / 2, b.d / 2, b.len, 24); if (b.axis === 'x') rod.rotateZ(Math.PI / 2);
+    addMesh(g, rod, mat(b.color, {transparent: true, opacity: .9}), base + s * b.d / 2); top = b.d;
+  } else if (b.shape === 'led') {
+    const sp = new THREE.CylinderGeometry(2.6, 2.6, b.spacer, 24); sp.rotateX(Math.PI / 2);
+    addMesh(g, sp, mat('#111827'), base + b.spacer / 2);
+    const len = b.h - b.spacer - 2.5, body = new THREE.CylinderGeometry(2.5, 2.5, len, 32); body.rotateX(Math.PI / 2);
+    addMesh(g, body, mat(b.color, {transparent: true, opacity: .85, emissive: b.color, emissiveIntensity: .15}), base + b.spacer + len / 2);
+    addMesh(g, new THREE.SphereGeometry(2.5, 32, 16), mat(b.color, {transparent: true, opacity: .85}), base + b.spacer + len);
+  } else if (b.shape === 'button') {
+    addMesh(g, new THREE.BoxGeometry(b.w, b.l, b.h), mat('#3f3f46'), base + b.h / 2);
+    const stem = new THREE.CylinderGeometry(1.75, 1.75, b.stem - b.h, 24); stem.rotateX(Math.PI / 2);
+    addMesh(g, stem, mat(b.color), base + b.h + (b.stem - b.h) / 2); top = b.stem;
+  } else if (b.shape === 'pad') {
+    for (const z of [T / 2 + .05, -T / 2 - .05]) addMesh(g, new THREE.TorusGeometry(1.3, .45, 12, 32), mat(b.color, {metalness: .7, roughness: .3}), z);
+    top = 1;
+    // the wire leaves the top side and heads away from the board's centre
+    const dir = new THREE.Vector2(c.x, c.y).normalize();
+    const pts = [[0, 0, T / 2], [0, 0, T / 2 + 3], [dir.x * 10, dir.y * 10, 7], [dir.x * 32, dir.y * 32, 3]].map(v => new THREE.Vector3(...v));
+    const wire = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, .7, 10), mat(b.wire, {roughness: .4}));
+    wire.userData.ref = ref; g.add(wire);
+  }
+  g.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.userData.base = {opacity: o.material.opacity, transparent: o.material.transparent, emissive: o.material.emissive.getHex(), ei: o.material.emissiveIntensity}; } });
+  scene.add(g); groups[ref] = g;
+  anchors[ref] = new THREE.Vector3(c.x, c.y, base + s * (Math.min(top, 4) + .6));
+}
+
+// ---------------------------------------------------------------- labels, tooltip, picking
+const labelEls = {};
+for (const ref of Object.keys(groups)) {
+  const d = document.createElement('div'); d.className = 'lbl'; d.textContent = M.parts[ref].label || ref; d.style.display = 'none';
+  $('#labels').append(d); labelEls[ref] = d;
+}
+let lit = new Set();
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+function pick(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  for (const hit of ray.intersectObjects(Object.values(groups), true)) {
+    let o = hit.object; while (o && !o.userData.ref) o = o.parent;
+    if (o) return o.userData.ref;
+  }
+  return null;
+}
+let down = null;
+renderer.domElement.addEventListener('pointerdown', e => { down = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 5) { const ref = pick(e); if (ref) selectPart(ref); }
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  const ref = pick(e), tip = $('#tip');
+  if (!ref) { tip.style.display = 'none'; renderer.domElement.style.cursor = ''; return; }
+  const r = stage.getBoundingClientRect(), p = M.parts[ref];
+  tip.style.display = 'block'; tip.style.left = (e.clientX - r.left + 12) + 'px'; tip.style.top = (e.clientY - r.top + 12) + 'px';
+  tip.textContent = `${p.label || ref} — ${p.value}`; renderer.domElement.style.cursor = 'pointer';
+});
+
+// ---------------------------------------------------------------- highlighting and ratsnest
+let rats = new THREE.Group(); scene.add(rats);
+function highlight(colors, edges = []) {
+  lit = new Set(Object.keys(colors || {}));
+  for (const [ref, g] of Object.entries(groups)) g.traverse(o => {
+    if (!o.isMesh) return;
+    const b = o.userData.base, m = o.material;
+    if (!colors) { m.transparent = b.transparent; m.opacity = b.opacity; m.emissive.setHex(b.emissive); m.emissiveIntensity = b.ei; }
+    else if (colors[ref]) { m.transparent = b.transparent; m.opacity = b.opacity; m.emissive.set(colors[ref]); m.emissiveIntensity = .75; }
+    else { m.transparent = true; m.opacity = .18; m.emissive.setHex(b.emissive); m.emissiveIntensity = b.ei; }
+    m.needsUpdate = true;
+  });
+  scene.remove(rats); rats = new THREE.Group();
+  for (const [a, b, color] of edges) {
+    const curve = new THREE.LineCurve3(anchors[a], anchors[b]);
+    rats.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 1, .35, 8), new THREE.MeshBasicMaterial({color, depthTest: false, transparent: true, opacity: .9})));
+    for (const r of [a, b]) { const dot = new THREE.Mesh(new THREE.SphereGeometry(.7, 16, 8), new THREE.MeshBasicMaterial({color, depthTest: false})); dot.position.copy(anchors[r]); rats.add(dot); }
+  }
+  rats.renderOrder = 10; scene.add(rats);
+}
+function spanningEdges(nodes) {   // minimum spanning tree over the parts of a net (Prim)
+  const refs = [...new Set(nodes.map(n => n.ref))].filter(r => anchors[r]);
+  const conf = {}; for (const n of nodes) if (!conf[n.ref] || rank(n.conf) < rank(conf[n.ref])) conf[n.ref] = n.conf;
+  const inTree = new Set(refs.slice(0, 1)), edges = [];
+  while (inTree.size < refs.length) {
+    let best = null;
+    for (const a of inTree) for (const b of refs) if (!inTree.has(b)) {
+      const d = anchors[a].distanceTo(anchors[b]); if (!best || d < best[2]) best = [a, b, d];
+    }
+    inTree.add(best[1]);
+    const weak = rank(conf[best[0]]) < rank(conf[best[1]]) ? conf[best[0]] : conf[best[1]];
+    edges.push([best[0], best[1], C[weak].color]);
+  }
+  return edges;
+}
+
+// ---------------------------------------------------------------- panels
+let current = null;
+function renderLists() {
+  const f = $('#search').value.trim().toLowerCase();
+  $('#qs').innerHTML = M.questions.filter(q => !f || (q.id + q.title).toLowerCase().includes(f))
+    .map(q => `<li data-q="${q.id}" class="${current && current.q === q.id ? 'sel' : ''}"><span>${q.id} ${esc(q.title)}</span></li>`).join('');
+  $('#nets').innerHTML = Object.entries(M.nets).filter(([name, net]) => net.nodes.some(n => enabled.has(n.conf)) &&
+      (!f || (name + ' ' + net.description + ' ' + net.nodes.map(n => n.ref).join(' ')).toLowerCase().includes(f)))
+    .map(([name, net]) => `<li data-net="${esc(name)}" class="${current && current.net === name ? 'sel' : ''}"><span>${esc(name)}</span><span class="n">${net.nodes.filter(n => enabled.has(n.conf)).length} ${chip(M.netConfidence[name])}</span></li>`).join('');
+  $('#parts').innerHTML = Object.keys(M.parts).sort((a, b) => a.localeCompare(b, undefined, {numeric: true}))
+    .filter(r => !f || (r + ' ' + M.parts[r].value + ' ' + (M.parts[r].label || '')).toLowerCase().includes(f))
+    .map(r => `<li data-ref="${r}" class="${current && current.ref === r ? 'sel' : ''}"><span>${esc(M.parts[r].label || r)}</span><span class="n">${esc(M.parts[r].value).slice(0, 24)}</span></li>`).join('');
+  document.querySelectorAll('#qs li').forEach(li => li.onclick = () => selectQuestion(li.dataset.q));
+  document.querySelectorAll('#nets li').forEach(li => li.onclick = () => selectNet(li.dataset.net));
+  document.querySelectorAll('#parts li').forEach(li => li.onclick = () => selectPart(li.dataset.ref));
+}
+function wire() {
+  $('#detail').querySelectorAll('a[data-net]').forEach(a => a.onclick = () => selectNet(a.dataset.net));
+  $('#detail').querySelectorAll('a[data-ref]').forEach(a => a.onclick = () => selectPart(a.dataset.ref));
+}
+function selectNet(name) {
+  current = {net: name};
+  const net = M.nets[name], vis = net.nodes.filter(n => enabled.has(n.conf));
+  const colors = {}; for (const n of vis) if (!colors[n.ref] || rank(n.conf) < rank(colors[n.ref])) colors[n.ref] = n.conf;
+  highlight(Object.fromEntries(Object.entries(colors).map(([r, c]) => [r, C[c].color])), spanningEdges(vis));
+  $('#detail').innerHTML = `<h3>Net</h3><h2 style="margin:0 0 4px">${esc(name)}</h2><p>${esc(net.description)}</p>` +
+    `<p>Weakest link: ${chip(M.netConfidence[name])}</p><table><tr><th>Pin</th><th>Confidence and evidence</th></tr>` +
+    vis.map(n => `<tr><td><a data-ref="${n.ref}">${esc(M.parts[n.ref].label || n.ref)}</a>.${esc(n.pin)}<br><span class="ev">${esc(M.parts[n.ref].pins[n.pin])}</span></td><td>${chip(n.conf)}<div class="ev">${esc(n.evidence)}</div></td></tr>`).join('') +
+    `</table><p class="ev">Lines join the parts on this net in the model (shortest tree, coloured by the weaker end), not the copper route.</p>`;
+  wire(); renderLists();
+}
+function selectPart(ref) {
+  current = {ref};
+  const p = M.parts[ref], colors = {[ref]: '#0f766e'};
+  const rows = Object.entries(p.pins).map(([num, name]) => {
+    const pn = pinNet[`${ref}.${num}`];
+    if (pn && enabled.has(pn.conf)) {
+      for (const n of M.nets[pn.net].nodes) if (n.ref !== ref && enabled.has(n.conf)) colors[n.ref] ||= '#f59e0b';
+      return `<tr><td>${esc(num)}</td><td>${esc(name)}</td><td><a data-net="${esc(pn.net)}">${esc(pn.net)}</a> ${chip(pn.conf)}</td></tr>`;
+    }
+    return `<tr><td>${esc(num)}</td><td>${esc(name)}</td><td class="muted">${pn ? 'hidden by filter' : 'unknown'}</td></tr>`;
+  }).join('');
+  highlight(colors);
+  const qs = M.questions.filter(q => q.pins.some(([r]) => r === ref));
+  $('#detail').innerHTML = `<h3>Part</h3><h2 style="margin:0 0 4px">${esc(p.label || ref)}</h2><p><b>${esc(p.value)}</b>${p.package ? ' · ' + esc(p.package) : ''}<br>` +
+    `<span class="muted">${esc(M.blocks[p.group].title)} · ${M.parts3d[ref] ? M.parts3d[ref].side + ' side' : 'not placed'}</span></p>` +
+    (p.note ? `<div class="box">${esc(p.note)}</div>` : '') + `<table><tr><th>Pin</th><th>Name</th><th>Net</th></tr>${rows}</table>` +
+    `<p class="ev">Teal: this part. Amber: parts sharing a net with it.</p>` +
+    qs.map(q => `<p><b>${q.id}</b> ${esc(q.title)}<br><span class="ev">Check: ${esc(q.check)}</span></p>`).join('');
+  wire(); renderLists();
+}
+function selectQuestion(id) {
+  current = {q: id};
+  const q = M.questions.find(x => x.id === id), colors = {};
+  for (const [r] of q.pins) colors[r] = '#dc2626';
+  highlight(colors);
+  $('#detail').innerHTML = `<h3>Open question</h3><h2 style="margin:0 0 4px">${q.id}</h2><p><b>${esc(q.title)}</b></p>` +
+    `<p>Pins: ${q.pins.map(([r, p]) => `<a data-ref="${r}">${esc(M.parts[r].label || r)}.${p}</a> (${esc(M.parts[r].pins[String(p)])})`).join(', ')}</p>` +
+    `<div class="box"><b>Check:</b> ${esc(q.check)}</div><p class="muted">${esc(q.why)}</p><p class="ev">Candidates: ${q.candidates.map(esc).join(', ')}</p>`;
+  wire(); renderLists();
+}
+function clear() {
+  current = null; highlight(null); renderLists();
+  $('#detail').innerHTML = '<h3>Details</h3><p class="muted">Click a part on the board, or pick a net, part or open question.</p><h3>Confidence</h3>' +
+    Object.entries(C).sort((a, b) => b[1].rank - a[1].rank).map(([k, v]) => `<p>${chip(k)} ${esc(v.meaning)}</p>`).join('');
+}
+for (const [k, v] of Object.entries(C).sort((a, b) => b[1].rank - a[1].rank)) {
+  const l = document.createElement('label'); l.title = v.meaning;
+  l.innerHTML = `<input type="checkbox" checked data-c="${k}">${chip(k)}`; $('#legend').append(l);
+}
+$('#legend').addEventListener('change', e => { const k = e.target.dataset.c; e.target.checked ? enabled.add(k) : enabled.delete(k);
+  if (current?.net) selectNet(current.net); else if (current?.ref) selectPart(current.ref); else renderLists(); });
+$('#search').addEventListener('input', renderLists);
+$('#clear').onclick = clear;
+$('#xray').onchange = e => { for (const m of boardMats) { m.transparent = e.target.checked; m.opacity = e.target.checked ? .3 : 1; m.depthWrite = !e.target.checked; m.needsUpdate = true; } };
+
+// ---------------------------------------------------------------- views and render loop
+const views = {iso: [0, -1.25 * W, 1.15 * W], top: [0, -0.45 * W, 1.75 * W], bottom: [0, -0.45 * W, -1.75 * W]};  // framed on the board width
+function setView(v) { camera.position.set(...views[v]); controls.target.set(0, 0, 0); controls.update(); }
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+const v = new THREE.Vector3();
+function frame() {
+  controls.update(); renderer.render(scene, camera);
+  const all = $('#alllabels').checked, w = stage.clientWidth, h = stage.clientHeight;
+  for (const [ref, el] of Object.entries(labelEls)) {
+    const show = all || lit.has(ref);
+    if (!show) { el.style.display = 'none'; continue; }
+    v.copy(anchors[ref]).project(camera);
+    if (v.z > 1) { el.style.display = 'none'; continue; }
+    el.style.display = 'block'; el.classList.toggle('hit', lit.has(ref));
+    el.style.left = ((v.x + 1) / 2 * w) + 'px'; el.style.top = ((1 - v.y) / 2 * h) + 'px';
+  }
+  requestAnimationFrame(frame);
+}
+resize(); setView('iso'); renderLists(); clear(); frame();
+// test hook: screen position of a part's anchor (used by tests/ui3d-test.mjs)
+window.__project = ref => { const p = anchors[ref].clone().project(camera), r = renderer.domElement.getBoundingClientRect();
+  return {x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height}; };
+window.__lit = () => [...lit].sort();
+window.__ready = true;
+</script>
+</body>
+</html>

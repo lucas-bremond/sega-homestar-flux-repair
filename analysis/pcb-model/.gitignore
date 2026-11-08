@@ -3,3 +3,4 @@ erc.rpt
 tests/node_modules/
 tests/package*.json
 tests/shots/
+__pycache__/
