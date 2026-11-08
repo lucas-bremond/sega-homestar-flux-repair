@@ -101,23 +101,36 @@ A connection promoted to `photo` or better without a wire in `schematic_layout` 
 
 ## Schematic
 
-`pcb-model.kicad_sch` draws a **wire** only for a verified connection (`photo`, `confirmed` or `measured`). Everything else keeps a net label coloured by its confidence. Pins with neither a wire nor a label are unknown. The wired clusters are laid out by hand in `schematic_layout` in `model.yaml`:
+`pcb-model.kicad_sch` draws **every known connection** (`schematic.py`). Only pins with no known net stay open: they are unknown, not unconnected.
 
-| Block          | Wired                                                   |
-| -------------- | ------------------------------------------------------- |
-| Input          | `DC+` pad ↔ R1B ↔ `R1B` pad                             |
-| Motor driver   | U4 pin 5 ↔ C6 ↔ `M+` pad; C6 ↔ `M-` pad; U4 pin 8 ↔ R13 |
-| 5 W LED driver | `5WL+` pad ↔ D16                                        |
+- **Signal nets** are wired. A wire's colour is the weakest confidence among the pins it joins. Solid means verified (`photo`, `confirmed` or `measured`); dashed means `datasheet` or `assumed`. Each wired net is named once, on its board pad if it has one.
+- **Power nets** (`power_nets` in `model.yaml`: GND, +5V, +3V3) use power symbols. A power-net pin without a wire gets a short stub and a symbol automatically.
+- **The layout** is hand-made per block in `schematic_layout` in `model.yaml`, or comes from the [schematic editor](#schematic-editor) once you export one. Parts not placed by hand are stacked below their block.
 
-`build.py` refuses a wire that:
+The build refuses a layout in which a wire:
 
-- joins two nets;
-- touches a pin it shouldn't;
-- runs diagonally;
-- lands in the middle of another wire;
-- ends on a connection below `photo`.
+- joins two nets, or reaches a pin whose net is unknown;
+- runs diagonally, or through a pin;
+- ends in the middle of another wire;
+- leaves a power-net group without a power symbol;
+- or in which two pins touch.
 
-It also refuses a model where a verified connection has no wire. Promote a connection to `measured` in `model.yaml`, then add its wire to `schematic_layout`.
+If an edit re-assigns a pin (say, U4 pin 4 measured on `DC+`), the hand-laid wires of its old group are dropped with a warning and those pins fall back to labels; the build never fails because of an edit to connections. A known pin left without a wire is reported and labelled (today only `J_5WLN.1`, the only known member of `5WL-`).
+
+### Schematic editor
+
+In `index.html`, **Schematic → Edit layout**:
+
+- **Select / move:** drag a part (it snaps to the 2.54 mm grid, and its wires follow with new corners); click a wire or a power symbol to select it; **Delete** removes it; **M** mirrors the selected part.
+- **Draw wire:** click pins or points (pins and wire ends snap within 1.3 mm, corners are added automatically); double-click or Enter ends the wire; Esc cancels.
+- **Power symbol:** pick the net and direction, then click a pin end or a wire end.
+- **Problems** are listed live, with the same rules as the build. A wire that reaches a pin with an unknown net offers a one-click fix: add that pin to the wire's net as `assumed`.
+- **Zoom:** the − and + buttons, or Ctrl+scroll.
+- Orange rings mark known pins that are not wired; faded power symbols are the ones the build will add.
+
+After any move or new wire, the editor tidies the wires: it drops repeated points and back-and-forth spikes, and splits a wire wherever another wire ends or turns on it, so every joint is a wire end. Moving a part does not move power symbols sitting on shared corners: tidy those by hand.
+
+The layout goes into `annotations.json` (`schematic`, absolute sheet millimetres) with the board edits: **Export annotations.json**, save it, run `./build.sh`. **Reset to automatic layout** removes it, so `model.yaml`'s layout applies again.
 
 ## Open questions
 
@@ -141,12 +154,14 @@ python -I build.py          # outputs only, without the KiCad steps
 Results on 2026-11-07:
 
 - **Netlist round trip:** the netlist KiCad derives from the generated schematic matches `model.yaml` on all 16 nets. This check found and fixed a bug where labels missed off-grid pins.
-- **ERC:** 144 findings, all expected:
+- **ERC:** 162 findings, all expected:
   - 88 `pin_not_connected`: exactly the 88 unknown pins.
-  - 55 `lib_symbol_issues`: the symbols are embedded in the schematic rather than in a KiCad library.
+  - 69 `lib_symbol_issues`: the 55 part symbols and 14 power-symbol variants are embedded in the schematic rather than in a KiCad library.
+  - 3 `power_pin_not_driven`: nothing on the sheet "drives" GND, +5V or +3V3 (KiCad wants a power flag; the supply is off-sheet).
   - 1 `label_dangling`: `5WL-`, a net whose only known member is the pad.
 - **3D view:** a headless Chromium test with software WebGL ([`tests/ui3d-test.mjs`](tests/ui3d-test.mjs)) passes 10 checks: the scene renders, the views switch, clicking U4 in the scene selects it, net and question selection light the right parts, `M+` lights only its traced copper, and the trace and enhanced-photo toggles work. No JavaScript errors.
-- **Editor:** the 2D test also drives the editor through 12 more checks: draw a trace, name it, drag a point, move a box, change a connection, undo, export, restore after reload, discard and import. `tests/check_editor_consistency.py` then confirms the build merges the exported file into the same 16 nets as the page.
+- **Schematic editor:** the 2D test drives it with the mouse: open clean, drag U4 (wires follow, layout stays valid), draw a wire to a pin with no net (problems reported), the one-click fix, place a power symbol (valid again) and export. `check_editor_consistency.py` confirms the build derives the same nets and accepts the layout, and the exported layout passes the KiCad round trip. 32 checks in all.
+- **Editor:** the 2D test also drives the board editor through 12 more checks: draw a trace, name it, drag a point, move a box, change a connection, undo, export, restore after reload, discard and import. `tests/check_editor_consistency.py` then confirms the build merges the exported file into the same 16 nets as the page.
 - **2D viewer:** a headless Chromium test ([`tests/ui-test.mjs`](tests/ui-test.mjs), run command in its header) passes 14 checks, covering net and part highlighting, the confidence filter, search and all four tabs, with no JavaScript errors.
 
 ## Limits

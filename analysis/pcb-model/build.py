@@ -21,7 +21,6 @@ import copy
 import html
 import io
 import json
-import math
 import re
 import sys
 import uuid
@@ -32,6 +31,7 @@ from PIL import Image, ImageOps
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from board3d import write_board_3d  # noqa: E402
+from schematic import merge_layout, prune_conflicts, render, resolve_layout, symbol_geometry  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
@@ -58,6 +58,7 @@ def load_annotations(path: Path) -> dict:
         "traces": ann.get("traces", []),
         "boxes": ann.get("boxes", {}),
         "connections": ann.get("connections", []),
+        "schematic": ann.get("schematic"),
     }
 
 
@@ -81,6 +82,9 @@ def validate_annotations(base: dict, ann: dict) -> list[str]:
                 errors.append(f"box override {ref}: unknown side {side!r}")
             elif box is not None and not (len(box) == 4 and box[0] < box[2] and box[1] < box[3]):
                 errors.append(f"box override {ref}.{side}: expected [x0, y0, x1, y1] with x0 < x1, y0 < y1")
+    for ref in (ann.get("schematic") or {}).get("parts", {}):
+        if ref not in parts:
+            errors.append(f"schematic layout: unknown part {ref}")
     for c in ann["connections"]:
         ref, pin = c.get("ref"), str(c.get("pin"))
         if ref not in parts or pin not in parts[ref]["pins"]:
@@ -327,296 +331,6 @@ def edge_points(ax, ay, bx, by, bw, bh) -> tuple[float, float, float, float]:
 
 # ----------------------------------------------------------------------------- KiCad schematic
 
-GRID = 2.54
-PIN_LEN = 2.54
-SCH_GROUP_ORDER = [
-    "input",
-    "regulator",
-    "mcu",
-    "motor",
-    "shooting_star",
-    "main_led",
-    "unknown",
-    "front_panel",
-]
-
-
-def uid(*parts: str) -> str:
-    """Stable UUIDs so regenerated schematics diff cleanly."""
-    return str(uuid.uuid5(NAMESPACE, "/".join(parts)))
-
-
-def q(text: str) -> str:
-    escaped = str(text).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-    return '"' + escaped + '"'
-
-
-def snap(v: float) -> float:
-    return round(round(v / 1.27) * 1.27, 2)
-
-
-def symbol_geometry(part: dict) -> dict:
-    pins = list(part["pins"].items())
-    half = (len(pins) + 1) // 2
-    left, right = pins[:half], pins[half:]
-    rows = max(len(left), len(right), 1)
-    longest = max(len(name) for _, name in pins)
-    # Whole multiples of 2 grid steps keep every pin end on the 2.54 mm grid,
-    # so the net labels placed there connect.
-    steps = 1 if len(pins) <= 2 else max(2, math.ceil((2 + longest * 0.9) / 2))
-    body_w = 2 * GRID * steps
-    body_h = GRID * (rows + 1)
-    top = GRID * math.ceil((rows + 1) / 2)
-    placed = []
-    for i, (num, name) in enumerate(left):
-        placed.append((num, name, -body_w / 2 - PIN_LEN, top - GRID * (i + 1), 0))
-    for i, (num, name) in enumerate(right):
-        placed.append((num, name, body_w / 2 + PIN_LEN, top - GRID * (i + 1), 180))
-    return {"w": body_w, "h": body_h, "top": top, "pins": placed}
-
-
-def lib_symbol(ref: str, part: dict, geo: dict) -> str:
-    name = f"model:{ref}"
-    w2, top = geo["w"] / 2, geo["top"]
-    font = "(effects (font (size 1.27 1.27)))"
-    hidden = "(effects (font (size 1.27 1.27)) hide)"
-    show_names = "" if len(part["pins"]) > 2 else "(pin_names hide)"
-    lines = [
-        f"(symbol {q(name)} {show_names} (exclude_from_sim no) (in_bom yes) (on_board yes)",
-        f'(property "Reference" {q(re.sub(r"[0-9_].*", "", ref) or "X")} (at 0 0 0) {font})',
-        f'(property "Value" {q(ref)} (at 0 0 0) {font})',
-        f'(property "Footprint" "" (at 0 0 0) {hidden})',
-        f'(property "Datasheet" "" (at 0 0 0) {hidden})',
-        f"(symbol {q(ref + '_0_1')} (rectangle (start {-w2:.2f} {top:.2f}) (end {w2:.2f} "
-        f"{top - geo['h']:.2f}) (stroke (width 0.254) (type default)) (fill (type background))))",
-        f"(symbol {q(ref + '_1_1')}",
-    ]
-    for num, pname, x, y, angle in geo["pins"]:
-        lines.append(
-            f"(pin passive line (at {x:.2f} {y:.2f} {angle}) (length {PIN_LEN}) "
-            f"(name {q(pname)} {font}) (number {q(num)} {font}))"
-        )
-    lines += ["))"]
-    return "\n".join(lines)
-
-
-VERIFIED_RANK = 3  # `photo` or better: the only connections drawn as wires
-
-
-def schematic(model: dict) -> tuple[str, tuple[float, float, float, float]]:
-    """KiCad schematic: hand-placed clusters with wires for verified connections, labels elsewhere."""
-    root = uid("root")
-    colors = {k: hex_rgb(v["color"]) for k, v in model["confidence"].items()}
-    rank = {k: v["rank"] for k, v in model["confidence"].items()}
-    nets_of = pin_nets(model)
-    layout = model.get("schematic_layout", {})
-    by_group: dict[str, list[str]] = {g: [] for g in SCH_GROUP_ORDER}
-    for ref, part in model["parts"].items():
-        by_group[part["group"]].append(ref)
-    lib, placed, texts = [], [], []
-    pin_xy: dict[tuple[str, str], tuple[float, float, int]] = {}
-
-    def place(ref: str, sx: float, sy: float, mirror: bool) -> dict:
-        part = model["parts"][ref]
-        geo = symbol_geometry(part)
-        lib.append(lib_symbol(ref, part, geo))
-        placed.append(placed_symbol(ref, part, sx, sy, geo, root, mirror))
-        for num, _name, px, py, angle in geo["pins"]:
-            if mirror:
-                px, angle = -px, 180 - angle
-            pin_xy[(ref, num)] = (round(sx + px, 2), round(sy - py, 2), angle)
-        return geo
-
-    x0, max_y, routes = 30.48, 0.0, []
-    for group in SCH_GROUP_ORDER:
-        spec = layout.get(group, {})
-        texts.append(
-            f"(text {q(model['blocks'][group]['title'])} (at {x0 - 10.16:.2f} 40.64 0) "
-            f"(effects (font (size 2.54 2.54) (bold yes)) (justify left bottom)) (uuid {q(uid('hdr', group))}))"
-        )
-        y = 50.8
-        bottom = y
-        for ref, pos in spec.get("place", {}).items():
-            geo = place(ref, x0 + pos[0], y + pos[1], len(pos) > 2 and pos[2] == "mirror")
-            bottom = max(bottom, y + pos[1] - geo["top"] + geo["h"])
-        if spec.get("place"):
-            y = GRID * math.ceil((bottom + 12.7) / GRID)
-        for ref in sorted(set(by_group[group]) - set(spec.get("place", {})), key=natural_key):
-            geo = symbol_geometry(model["parts"][ref])
-            place(ref, x0 + 10.16, y + geo["top"], False)
-            y += geo["h"] + 12.7
-        for route in spec.get("wires", []):
-            routes.append((group, x0, 50.8, route))
-        max_y = max(max_y, y)
-        x0 += spec.get("width", 66.04)
-
-    wires, junctions, wired, segments = route_wires(routes, pin_xy, nets_of, rank)
-    missing = [
-        f"{r}.{p}"
-        for (r, p), (net, conf) in nets_of.items()
-        if rank[conf] >= VERIFIED_RANK
-        and (r, p) not in wired
-        and sum(1 for (n2, c2) in nets_of.values() if n2 == net and rank[c2] >= VERIFIED_RANK) > 1
-    ]
-    if missing:  # labelled instead; add a wire to schematic_layout to draw them
-        print(f"warning: verified connections without a wire in schematic_layout: {', '.join(sorted(missing))}")
-
-    labels = []
-    # A wired net is named once: on its board pad if it has one, else above its longest horizontal wire.
-    for net_name in sorted({nets_of[p][0] for p in wired}):
-        pins = [p for p in wired if nets_of[p][0] == net_name]
-        pads = sorted(p for p in pins if model["parts"][p[0]]["kind"] == "pad")
-        conf = min((nets_of[p][1] for p in pins), key=rank.__getitem__)
-        rgb = colors[conf]
-        if pads:
-            x, y, angle = pin_xy[pads[0]]
-            side_angle, justify = (180, "right") if angle == 0 else (0, "left")
-        else:
-            a, b = max(
-                (sg for sg in segments if sg[2] == net_name and sg[0][1] == sg[1][1]),
-                key=lambda sg: abs(sg[1][0] - sg[0][0]),
-            )[:2]
-            x, y, side_angle, justify = round(round((a[0] + b[0]) / 2 / 1.27) * 1.27, 2), a[1], 0, "left"
-        labels.append(
-            f"(label {q(net_name)} (at {x:.2f} {y:.2f} {side_angle}) "
-            f"(effects (font (size 1.27 1.27) (color {rgb[0]} {rgb[1]} {rgb[2]} 1)) "
-            f"(justify {justify} bottom)) (uuid {q(uid('label', 'wired', net_name))}))"
-        )
-    for (ref, num), (x, y, angle) in sorted(pin_xy.items()):
-        net = nets_of.get((ref, num))
-        if not net or (ref, num) in wired:
-            continue
-        rgb = colors[net[1]]
-        side_angle, justify = (180, "right") if angle == 0 else (0, "left")
-        labels.append(
-            f"(label {q(net[0])} (at {x:.2f} {y:.2f} {side_angle}) "
-            f"(effects (font (size 1.27 1.27) (color {rgb[0]} {rgb[1]} {rgb[2]} 1)) "
-            f"(justify {justify} bottom)) (uuid {q(uid('label', ref, num))}))"
-        )
-    legend = [
-        "Wires: connections verified (photo, confirmed or measured). Labels: the rest, coloured by confidence:"
-    ] + [f"  {k} — {v['meaning']}" for k, v in sorted(model["confidence"].items(), key=lambda kv: -kv[1]["rank"])]
-    legend += ["Pins without a label or wire are UNKNOWN, not unconnected. Generated from model.yaml."]
-    texts.append(
-        f"(text {q(chr(10).join(legend))} (at 20.32 15.24 0) (effects (font (size 1.778 1.778)) "
-        f"(justify left top)) (uuid {q(uid('legend'))}))"
-    )
-    board = model["board"]
-    drawn = (12.7, 10.16, x0 + 10.16, max_y)
-    text = "\n".join(
-        [
-            '(kicad_sch (version 20231120) (generator "homestar_build_py") (generator_version "8.0")',
-            f"(uuid {q(root)})",
-            '(paper "A2")',
-            f"(title_block (title {q(board['name'] + ' — partial model')}) (date {q(board['model_date'])}) "
-            f'(rev "model") (comment 1 {q(board["marking"])}) '
-            f'(comment 2 "Reconstructed from photos; see analysis/pcb-model/model.yaml"))',
-            "(lib_symbols",
-            *lib,
-            ")",
-            *texts,
-            *wires,
-            *junctions,
-            *labels,
-            *placed,
-            '(sheet_instances (path "/" (page "1")))',
-            ")",
-            "",
-        ]
-    )
-    return text, drawn
-
-
-def route_wires(routes: list, pin_xy: dict, nets_of: dict, rank: dict) -> tuple[list, list, set, list]:
-    """Turn schematic_layout wires into KiCad wires and junctions, refusing anything unsafe."""
-    point_net: dict[tuple[float, float], str] = {}
-    segments: list[tuple[tuple[float, float], tuple[float, float], str]] = []
-    wired: set[tuple[str, str]] = set()
-    for group, ox, oy, route in routes:
-        points, pins = [], []
-        for step in route:
-            if isinstance(step, str):
-                ref, num = step.rsplit(".", 1)
-                if (ref, num) not in pin_xy:
-                    raise ValueError(f"{group}: wire to unknown pin {step}")
-                pins.append((ref, num))
-                points.append(pin_xy[(ref, num)][:2])
-            else:
-                points.append((round(ox + step[0], 2), round(oy + step[1], 2)))
-        nets = {nets_of.get(p, (None, None))[0] for p in pins}
-        if not pins or None in nets:
-            raise ValueError(f"{group}: wire {route} must end on pins that are on a net")
-        if len(nets) > 1:
-            raise ValueError(f"{group}: wire {route} would join nets {sorted(nets)}")
-        for p in pins:
-            if rank[nets_of[p][1]] < VERIFIED_RANK:
-                raise ValueError(f"{group}: {p[0]}.{p[1]} is only {nets_of[p][1]}; wires are for verified connections")
-        net = nets.pop()
-        for pt in points:
-            if point_net.setdefault(pt, net) != net:
-                raise ValueError(f"{group}: point {pt} is on {point_net[pt]} and {net}")
-        for a, b in zip(points, points[1:], strict=False):
-            if a[0] != b[0] and a[1] != b[1]:
-                raise ValueError(f"{group}: wire segment {a}-{b} is not horizontal or vertical")
-            segments.append((a, b, net))
-        wired.update(pins)
-    # a wire may touch a pin only if that pin is one of the wired pins of the same net
-    for (ref, num), (x, y, _) in pin_xy.items():
-        for a, b, net in segments:
-            if on_segment((x, y), a, b) and ((ref, num) not in wired or nets_of[(ref, num)][0] != net):
-                raise ValueError(f"wire {a}-{b} ({net}) touches {ref}.{num}")
-    ends: dict[tuple[float, float], int] = {}
-    for a, b, _ in segments:
-        for pt in (a, b):
-            ends[pt] = ends.get(pt, 0) + 1
-    for pt in ends:
-        for a, b, net in segments:
-            if pt not in (a, b) and on_segment(pt, a, b):
-                raise ValueError(f"wire end {pt} lands mid-segment on {a}-{b} ({net}); split the wire there")
-    wires = [
-        f"(wire (pts (xy {a[0]:.2f} {a[1]:.2f}) (xy {b[0]:.2f} {b[1]:.2f})) "
-        f"(stroke (width 0) (type default)) (uuid {q(uid('wire', net, str(a), str(b)))}))"
-        for a, b, net in segments
-    ]
-    junctions = [
-        f"(junction (at {pt[0]:.2f} {pt[1]:.2f}) (diameter 0) (color 0 0 0 0) (uuid {q(uid('junction', str(pt)))}))"
-        for pt, n in sorted(ends.items())
-        if n >= 3
-    ]
-    return wires, junctions, wired, segments
-
-
-def on_segment(p: tuple, a: tuple, b: tuple) -> bool:
-    (x, y), (x1, y1), (x2, y2) = p, a, b
-    if x1 == x2 == x:
-        return min(y1, y2) <= y <= max(y1, y2)
-    if y1 == y2 == y:
-        return min(x1, x2) <= x <= max(x1, x2)
-    return False
-
-
-def placed_symbol(ref: str, part: dict, sx: float, sy: float, geo: dict, root: str, mirror: bool = False) -> str:
-    font = "(effects (font (size 1.27 1.27)) (justify left))"
-    pins = " ".join(f"(pin {q(num)} (uuid {q(uid('pin', ref, num))}))" for num in part["pins"])
-    return (
-        f"(symbol (lib_id {q('model:' + ref)}) (at {sx:.2f} {sy:.2f} 0) {'(mirror y) ' if mirror else ''}(unit 1) "
-        f"(exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid {q(uid('sym', ref))}) "
-        f'(property "Reference" {q(ref)} (at {sx - geo["w"] / 2:.2f} {sy - geo["top"] - 1.27:.2f} 0) {font}) '
-        f'(property "Value" {q(part["value"])} (at {sx - geo["w"] / 2:.2f} '
-        f"{sy - geo['top'] + geo['h'] + 2.54:.2f} 0) {font}) "
-        f'(property "Footprint" "" (at {sx:.2f} {sy:.2f} 0) (effects (font (size 1.27 1.27)) hide)) '
-        f'(property "Datasheet" "" (at {sx:.2f} {sy:.2f} 0) (effects (font (size 1.27 1.27)) hide)) '
-        f'{pins} (instances (project "pcb-model" (path {q("/" + root)} (reference {q(ref)}) (unit 1)))))'
-    )
-
-
-def hex_rgb(color: str) -> tuple[int, int, int]:
-    color = color.lstrip("#")
-    return tuple(int(color[i : i + 2], 16) for i in (0, 2, 4))
-
-
-# ----------------------------------------------------------------------------- KiCad netlist check
-
 
 def kicad_nets(netlist_text: str) -> dict[str, set[tuple[str, str]]]:
     """Parse the nets of a kicad-cli 'kicadsexpr' netlist (labelled nets only)."""
@@ -625,7 +339,7 @@ def kicad_nets(netlist_text: str) -> dict[str, set[tuple[str, str]]]:
         r"\(net \(code \"?\d+\"?\) \(name \"([^\"]*)\"\)(.*?)\)\s*(?=\(net |\)\s*\)\s*$)", netlist_text, flags=re.S
     ):
         name, body = block
-        nodes = set(re.findall(r'\(node \(ref "([^"]+)"\) \(pin "([^"]+)"\)', body))
+        nodes = {n for n in re.findall(r'\(node \(ref "([^"]+)"\) \(pin "([^"]+)"\)', body) if not n[0].startswith("#")}
         nets[name.lstrip("/")] = nodes
     return nets
 
@@ -658,7 +372,9 @@ def photo_data_uri(rel_path: str) -> tuple[str, float]:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode(), scale
 
 
-def write_html(model: dict, diagram_svg: str, drawn: tuple, path: Path, base: dict, annotations: dict) -> None:
+def write_html(
+    model: dict, diagram_svg: str, drawn: tuple, path: Path, base: dict, annotations: dict, schematic_data: dict
+) -> None:
     """index.html gets the base model and the annotations separately: its editor applies and edits them."""
     photos = {}
     for side, info in model["photos"].items():
@@ -677,6 +393,7 @@ def write_html(model: dict, diagram_svg: str, drawn: tuple, path: Path, base: di
         "parts": base["parts"],
         "nets": base["nets"],
         "annotations": annotations,
+        "schematic": schematic_data,
         "questions": model["open_questions"],
         "blocks": model["blocks"],
         "photos": {k: {kk: vv for kk, vv in v.items() if kk != "uri"} for k, v in photos.items()},
@@ -715,6 +432,14 @@ HTML_TEMPLATE = (
 # ----------------------------------------------------------------------------- main
 
 
+def build_layout(model: dict, annotations: dict) -> tuple[dict, dict, list[str]]:
+    """The automatic layout (model.yaml, minus wired groups whose pins no longer share a net)
+    and the layout to draw (the exported one if annotations.json has it)."""
+    auto_layout, dropped = prune_conflicts(model, resolve_layout(model), pin_nets(model))
+    exported = annotations.get("schematic")
+    return auto_layout, merge_layout(auto_layout, exported), [] if exported else dropped
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--model", type=Path, default=HERE / "model.yaml")
@@ -746,12 +471,28 @@ def main() -> int:
     write_netlist_md(model, HERE / "netlist.md")
     diagram = block_diagram_svg(model)
     (HERE / "block-diagram.svg").write_text(diagram + "\n", encoding="utf-8")
-    sch_text, drawn = schematic(model)
+    rank = {k: v["rank"] for k, v in model["confidence"].items()}
+    power_nets = set(model.get("power_nets", []))
+    auto_layout, layout, dropped = build_layout(model, annotations)
+    if dropped:
+        print(f"warning: hand-laid wires dropped, their pins no longer share one net: {', '.join(dropped)}")
+    try:
+        sch_text, drawn, report = render(model, layout, pin_nets(model), rank, power_nets)
+    except ValueError as err:
+        print(err)
+        return 1
     (HERE / "pcb-model.kicad_sch").write_text(sch_text, encoding="utf-8")
+    if report["unconnected"]:
+        print(f"warning: known pins left as labels (no wire in the layout): {', '.join(report['unconnected'])}")
     if not HTML_TEMPLATE:
         print("viewer_template.html missing")
         return 1
-    write_html(model, diagram, drawn, HERE / "index.html", base, annotations)
+    schematic_data = {
+        "auto": auto_layout,
+        "geometry": {ref: symbol_geometry(part) for ref, part in model["parts"].items()},
+        "powerNets": sorted(power_nets),
+    }
+    write_html(model, diagram, drawn, HERE / "index.html", base, annotations, schematic_data)
     data3d = {
         "confidence": model["confidence"],
         "parts": model["parts"],

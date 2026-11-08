@@ -35,6 +35,7 @@ Investigation log for the Homestar Flux fault described in the [README](README.m
 | 12  | 2026-11-07 | Run a PCB-trained YOLO model on the photos            | Finds 41 of 44 parts; ICs and SMD passives right, U4 called a diode on the board view  | [Nothing new](analysis/yolo26/README.md)           |
 | 13  | 2026-11-07 | Build a partial board model from the photos           | 45 of 133 pins on a net, mostly assumed; netlist, KiCad schematic and HTML viewer      | [Board model](analysis/pcb-model/README.md)        |
 | 14  | 2026-11-08 | Trace audit of the model; wires and 3D traces         | C6 traced across M+/M-; 4 placement-only links downgraded; 6 nets wired                | [Wires](analysis/pcb-model/README.md#schematic)    |
+| 15  | 2026-11-08 | Draw every known connection; schematic editor         | All 45 known pins wired or on power symbols; wire style shows confidence               | [Editor](analysis/pcb-model/README.md#schematic)   |
 
 ## Findings
 

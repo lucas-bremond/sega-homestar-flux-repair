@@ -91,6 +91,26 @@
   .detail button { font:inherit; font-size:12.5px; padding:3px 9px; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; margin:2px 4px 2px 0; }
   .detail button.danger { color:#b91c1c; border-color:#fca5a5; }
   .edited { color:#0f766e; font-weight:600; }
+  .seg button { font:inherit; padding:4px 12px; border:1px solid #cbd5e1; background:#fff; cursor:pointer; }
+  .seg button:first-child { border-radius:6px 0 0 6px; } .seg button:last-child { border-radius:0 6px 6px 0; border-left:0; }
+  .seg button.on { background:#0f766e; color:#fff; border-color:#0f766e; }
+  .schedit-wrap { display:grid; grid-template-columns:1fr 330px; gap:12px; }
+  .schedit-canvas { height:calc(100vh - 230px); background:#f5f4ef; }
+  #schedit-svg { display:block; height:auto; user-select:none; -webkit-user-select:none; }
+  .sch-body { fill:#ffffc2; stroke:#840000; stroke-width:.254; }
+  .sch-pin { stroke:#840000; stroke-width:.2; }
+  .sch-ref, .sch-val, .sch-pnum, .sch-pname, .sch-ptext, .sch-hdr { font-family:system-ui, sans-serif; pointer-events:none; }
+  .sch-ref { font-size:1.4px; fill:#006464; } .sch-val { font-size:1.2px; fill:#006464; }
+  .sch-pnum { font-size:1px; fill:#a90000; } .sch-pname { font-size:1px; fill:#006464; } .sch-ptext { font-size:1.2px; fill:#840000; }
+  .sch-hdr { font-size:2.6px; font-weight:700; fill:#0000c2; }
+  .sch-part { cursor:move; } .sch-part.sel .sch-body { stroke:#0d9488; stroke-width:.6; }
+  .sch-wire { fill:none; stroke-width:.35; cursor:pointer; } .sch-wire.sel { stroke-width:.8; }
+  .sch-junction { fill:#008400; }
+  .sch-end { fill:transparent; stroke:none; } .sch-end.loose { stroke:#f59e0b; stroke-width:.35; }
+  .sch-pwr { fill:none; stroke-width:.254; } .sch-power { cursor:pointer; } .sch-power.sel .sch-pwr { stroke:#0d9488; stroke-width:.6; }
+  .sch-auto { opacity:.35; pointer-events:none; }
+  .sch-draft { fill:none; stroke:#0d9488; stroke-width:.3; stroke-dasharray:.8 .5; pointer-events:none; }
+  .bad { color:#b91c1c; } .good { color:#15803d; }
 </style>
 </head>
 <body>
@@ -155,11 +175,31 @@
 
 <main id="tab-schematic">
   <p class="banner" id="schemnote" hidden></p>
-  <div class="toolbar">
-    <button data-z="-1">−</button><button data-z="1">+</button><button data-z="0">Fit</button>
-    <span class="muted">Exported from pcb-model.kicad_sch with kicad-cli. Label colour = confidence. Pins without a label are unknown.</span>
+  <div class="toolbar"><span class="seg"><button data-schview="kicad" class="on">KiCad export</button><button data-schview="edit">Edit layout</button></span></div>
+  <div id="schkicad">
+    <div class="toolbar">
+      <button data-z="-1">−</button><button data-z="1">+</button><button data-z="0">Fit</button>
+      <span class="muted">pcb-model.kicad_sch as exported by kicad-cli at the last build. Wire colour = confidence; solid = verified, dashed = datasheet or assumed. Open pins are unknown.</span>
+    </div>
+    <div class="schem" id="schem">__SCHEMATIC__</div>
   </div>
-  <div class="schem" id="schem">__SCHEMATIC__</div>
+  <div id="schedit" hidden>
+    <div class="editbar">
+      <button data-stool="select" class="on">Select / move</button>
+      <button data-stool="wire">Draw wire</button>
+      <button data-stool="power">Power symbol</button>
+      <span id="power-opts" hidden><select id="power-net"></select><select id="power-dir"><option value="D">down</option><option value="U">up</option><option value="L">left</option><option value="R">right</option></select></span>
+      <button id="sch-delete" title="Delete">Delete selected</button>
+      <button id="sch-undo">Undo</button>
+      <span class="sep"></span>
+      <button data-schz="-1">−</button><button data-schz="1">+</button>
+      <button id="sch-reset">Reset to automatic layout</button>
+      <button id="sch-export" class="primary">Export annotations.json</button>
+    </div>
+    <p class="muted" id="schedit-hint"></p>
+    <div class="schedit-wrap"><div class="schem schedit-canvas"><svg id="schedit-svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+      <aside class="detail" id="schedit-problems"></aside></div>
+  </div>
 </main>
 
 <main id="tab-questions">
@@ -233,8 +273,10 @@
     const c0 = cs(BUILT), c1 = cs(ann);
     for (const x of c1) if (!c0.has(x)) n++;
     for (const x of c0) if (!c1.has(x)) n++;
+    if (JSON.stringify(a0s(BUILT)) !== JSON.stringify(a0s(ann))) n++;
     return n;
   }
+  const a0s = a => a.schematic || null;
   function mutate(fn) {
     undoStack.push(JSON.stringify(ann));
     fn(ann);
@@ -243,6 +285,7 @@
   function commit() {
     try { localStorage.setItem(STORE, JSON.stringify(ann)); } catch (e) { /* page-only */ }
     recompute(); drawOverlays(); renderLists(); reselect(); status();
+    if (typeof schRender === 'function' && !$('#schedit').hidden) schRender();
   }
   function status() {
     const n = changeCount();
@@ -421,7 +464,7 @@
       }
     });
     svg.addEventListener('click', ev => {
-      if (editing && tool === 'draw') { if (ev.detail >= 2) finishDraft(); else addDraftPoint(side, svgPoint(svg, ev)); return; }
+      if (editing && tool === 'draw') { addDraftPoint(side, svgPoint(svg, ev)); if (ev.detail >= 2) finishDraft(); return; }
       const t = ev.target;
       if (t.dataset.trace) { selectTrace(t.dataset.trace); return; }
       if (t.dataset.ref) { selectPart(t.dataset.ref); return; }
@@ -506,6 +549,7 @@
     const out = {
       _comment: 'Edits made in index.html\'s editor (traces, part-box overrides, connection overrides). build.py applies them on top of model.yaml. Export a new copy from the editor to replace this file.',
       version: 1, board: D.board.marking, traces: ann.traces, boxes: ann.boxes || {}, connections: ann.connections || [],
+      ...(ann.schematic ? {schematic: ann.schematic} : {}),
     };
     return JSON.stringify(out, null, 2).replace(/\[\s+(-?\d+(?:\.\d+)?),\s+(-?\d+(?:\.\d+)?)\s+\]/g, '[$1, $2]') + '\n';
   }
@@ -525,7 +569,9 @@
     for (const c of a.connections || []) if (!D.parts[c.ref] || !(String(c.pin) in D.parts[c.ref].pins)) problems.push(`unknown pin ${c.ref}.${c.pin}`);
     for (const ref of Object.keys(a.boxes || {})) if (!D.parts[ref]) problems.push(`unknown part ${ref}`);
     if (problems.length) throw new Error(problems.join('; '));
-    mutate(s => { s.traces = a.traces || []; s.boxes = a.boxes || {}; s.connections = a.connections || []; });
+    for (const ref of Object.keys((a.schematic || {}).parts || {})) if (!D.parts[ref]) problems.push(`schematic: unknown part ${ref}`);
+    if (problems.length) throw new Error(problems.join('; '));
+    mutate(s => { s.traces = a.traces || []; s.boxes = a.boxes || {}; s.connections = a.connections || []; if (a.schematic) s.schematic = a.schematic; else delete s.schematic; });
   }
   $('#import').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
@@ -766,9 +812,339 @@
     document.querySelectorAll('.stage').forEach(st => st.style.setProperty('--pz', pz));
   });
 
+  // ============================================================ schematic layout editor
+  const G = D.schematic.geometry, POWER_NETS = new Set(D.schematic.powerNets);
+  const r2 = v => Math.round(v * 100) / 100;
+  const snapG = v => r2(Math.round(v / 2.54) * 2.54);
+  const PDIRS = {L: [-1, 0], R: [1, 0], U: [0, -1], D: [0, 1]};
+  // the hand layout from model.yaml, minus wired groups whose pins no longer share one net
+  // (same rule as schematic.py prune_conflicts)
+  function autoLayout() {
+    const lay = {parts: clone(D.schematic.auto.parts), wires: clone(D.schematic.auto.wires), power: clone(D.schematic.auto.power)};
+    const A = analyseLayout(lay);
+    const bad = new Set(A.problems.filter(p => p.group !== undefined && (p.text.includes('joins nets') || p.text.includes('unknown'))).map(p => p.group));
+    if (!bad.size) return lay;
+    lay.wires = lay.wires.filter(w => !bad.has(A.find(w[0])));
+    lay.power = lay.power.filter(([, x, y]) => !bad.has(A.find([r2(x), r2(y)])) && !bad.has('pin:' + r2(x) + ',' + r2(y)));
+    return lay;
+  }
+  const layoutNow = () => ann.schematic || autoLayout();
+  function pinEndsOf(lay) {
+    const out = {};
+    for (const [ref, [sx, sy, mir]] of Object.entries(lay.parts)) for (const [num, , px, py, ang] of G[ref].pins) {
+      const x = mir ? -px : px, a = mir ? 180 - ang : ang;
+      out[`${ref}.${num}`] = {x: r2(sx + x), y: r2(sy - py), out: a === 0 ? 'L' : 'R', ref, num};
+    }
+    return out;
+  }
+  // Same rules as schematic.py analyse(); returns problems instead of raising.
+  function analyseLayout(lay) {
+    const ends = pinEndsOf(lay), pinAt = {};
+    const problems = [];
+    for (const [k, e] of Object.entries(ends)) {
+      if (pinAt[`${e.x},${e.y}`]) problems.push({text: `pins ${pinAt[`${e.x},${e.y}`]} and ${k} touch; move one of the parts`});
+      pinAt[`${e.x},${e.y}`] = k;
+    }
+    const segs = [], parent = {};
+    const find = x => { if (!(x in parent)) parent[x] = x; while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    lay.wires.forEach((w, i) => {
+      const pts = w.map(p => [r2(p[0]), r2(p[1])]);
+      if (pts.length < 2) problems.push({text: `wire ${i}: needs two points`, wire: i});
+      for (let k = 0; k + 1 < pts.length; k++) {
+        const [a, b] = [pts[k], pts[k + 1]];
+        if (a[0] !== b[0] && a[1] !== b[1]) problems.push({text: `wire ${i}: a segment is diagonal`, wire: i});
+        if (a[0] !== b[0] || a[1] !== b[1]) segs.push({a, b, i});
+      }
+    });
+    const key = p => `${p[0]},${p[1]}`, cnt = {};
+    for (const s of segs) { parent[find(key(s.a))] = find(key(s.b)); for (const p of [s.a, s.b]) cnt[key(p)] = (cnt[key(p)] || 0) + 1; }
+    const onSeg = (p, a, b) => (a[0] === b[0] && b[0] === p[0] && Math.min(a[1], b[1]) <= p[1] && p[1] <= Math.max(a[1], b[1])) ||
+      (a[1] === b[1] && b[1] === p[1] && Math.min(a[0], b[0]) <= p[0] && p[0] <= Math.max(a[0], b[0]));
+    for (const k of Object.keys(cnt)) { const p = k.split(',').map(Number);
+      for (const s of segs) if (k !== key(s.a) && k !== key(s.b) && onSeg(p, s.a, s.b)) problems.push({text: `a wire ends on the middle of wire ${s.i}: split it there`, wire: s.i}); }
+    for (const [pk, e] of Object.entries(ends)) for (const s of segs)
+      if (onSeg([e.x, e.y], s.a, s.b) && key([e.x, e.y]) !== key(s.a) && key([e.x, e.y]) !== key(s.b)) problems.push({text: `wire ${s.i} runs through pin ${pk}`, wire: s.i});
+    const groups = {};
+    const grp = id => groups[id] || (groups[id] = {pins: new Set(), power: [], points: new Set()});
+    for (const k of Object.keys(cnt)) { grp(find(k)).points.add(k); if (pinAt[k]) grp(find(k)).pins.add(pinAt[k]); }
+    lay.power.forEach(([net, x, y, d], j) => {
+      const k = key([r2(x), r2(y)]);
+      if (!PDIRS[d]) problems.push({text: `power symbol ${net}: bad direction ${d}`, power: j});
+      if (cnt[k]) grp(find(k)).power.push(j);
+      else if (pinAt[k]) { const g = grp('pin:' + k); g.pins.add(pinAt[k]); g.power.push(j); g.points.add(k); }
+      else problems.push({text: `power symbol ${net} is not on a pin or wire end`, power: j});
+    });
+    const wired = new Set(), styled = {};
+    for (const [id, g] of Object.entries(groups)) {
+      const nets = new Set([...g.pins].map(p => pinNet[p]?.net ?? null).concat(g.power.map(j => lay.power[j][0])));
+      const known = [...nets].filter(n => n !== null);
+      if (known.length > 1) problems.push({text: `a wire joins nets ${known.sort().join(', ')} (${[...g.pins].sort().join(', ')})`, group: id});
+      for (const p of g.pins) if (!pinNet[p]) problems.push({text: `${p} is wired but its net is unknown`, fix: known.length === 1 ? {pin: p, net: known[0]} : null, group: id});
+      if (!g.pins.size && !g.power.length) problems.push({text: 'a wire is not connected to any pin', group: id});
+      if (known.length !== 1) continue;
+      const net = known[0], confs = [...g.pins].map(p => pinNet[p]?.conf).filter(Boolean);
+      styled[id] = {net, conf: confs.length ? confs.reduce((p, q) => rank(p) <= rank(q) ? p : q) : 'confirmed'};
+      g.pins.forEach(p => pinNet[p] && wired.add(p));
+      if (POWER_NETS.has(net) && !g.power.length && g.points.size) problems.push({text: `wired ${net} group (${[...g.pins].sort().join(', ')}) needs a power symbol`, group: id});
+    }
+    const placedPower = new Set(lay.power.map(([, x, y]) => key([r2(x), r2(y)])));
+    const autoPower = [], loose = [];
+    for (const [pk, e] of Object.entries(ends)) {
+      const pn = pinNet[pk];
+      if (!pn || wired.has(pk) || placedPower.has(key([e.x, e.y]))) continue;
+      if (POWER_NETS.has(pn.net)) autoPower.push({pk, e, net: pn.net, conf: pn.conf}); else loose.push(pk);
+    }
+    return {problems, segs, find: p => find(key(p)), styled, wired, ends, cnt, autoPower, loose};
+  }
+
+  // ---- state and rendering
+  let schTool = 'select', schSel = null, schDraft = null, schDrag = null, schZoom = 2.5;
+  const svgS = $('#schedit-svg');
+  function sEl(tag, attrs, parent) { const e = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); parent && parent.append(e); return e; }
+  function powerShape(net, d) {
+    const [dx, dy] = PDIRS[d], [px, py] = [-dy, dx], at = (a, b) => [r2(dx * a + px * b), r2(dy * a + py * b)];
+    return net === 'GND' ? [[at(0, 0), at(1.27, 0)], [at(1.27, -1.27), at(1.27, 1.27)], [at(1.9, -0.76), at(1.9, 0.76)], [at(2.5, -0.25), at(2.5, 0.25)]]
+      : [[at(0, 0), at(1.27, 0)], [at(1.27, -1.27), at(1.27, 1.27)]];
+  }
+  function drawPower(g, net, x, y, d, cls, color) {
+    for (const line of powerShape(net, d)) sEl('polyline', {points: line.map(([a, b]) => `${x + a},${y + b}`).join(' '), class: cls, stroke: color}, g);
+    const [dx, dy] = PDIRS[d];
+    const t = sEl('text', {x: x + 5.08 * dx, y: y + 3.81 * dy + 0.5, class: 'sch-ptext', 'text-anchor': 'middle'}, g); t.textContent = net;
+  }
+  function schRender() {
+    const lay = layoutNow(), A = analyseLayout(lay);
+    const xs = Object.values(lay.parts).map(p => p[0]), ys = Object.values(lay.parts).map(p => p[1]);
+    const vb = [Math.min(...xs) - 30, 30, Math.max(...xs) - Math.min(...xs) + 70, Math.max(...ys) + 10];
+    svgS.setAttribute('viewBox', vb.join(' '));
+    svgS.style.width = (schZoom * 100) + '%';
+    svgS.replaceChildren();
+    for (const [title, x, y] of D.schematic.auto.headers) { const t = sEl('text', {x, y, class: 'sch-hdr'}, svgS); t.textContent = title; }
+    // wires
+    lay.wires.forEach((w, i) => {
+      const id = A.find(w[0]), st = A.styled[id] || {conf: 'assumed', net: '?'};
+      const pl = sEl('polyline', {points: w.map(p => p.join(',')).join(' '), class: 'sch-wire' + (schSel?.wire === i ? ' sel' : ''),
+        stroke: A.styled[id] ? C[st.conf].color : '#000', 'stroke-dasharray': rank(st.conf) >= 3 ? '' : '1.2 0.8'}, svgS);
+      pl.dataset.wire = i; sEl('title', {}, pl).textContent = `wire ${i} · ${st.net} (${st.conf})`;
+    });
+    for (const [k, n] of Object.entries(A.cnt)) {
+      const [x, y] = k.split(',').map(Number), pin = Object.values(A.ends).some(e => e.x === x && e.y === y);
+      if (n >= 3 || (n >= 2 && pin)) sEl('circle', {cx: x, cy: y, r: 0.6, class: 'sch-junction'}, svgS);
+    }
+    // parts
+    for (const [ref, [sx, sy, mir]] of Object.entries(lay.parts)) {
+      const g = sEl('g', {class: 'sch-part' + (schSel?.ref === ref ? ' sel' : '')}, svgS); g.dataset.ref = ref;
+      const geo = G[ref];
+      sEl('rect', {x: sx - geo.w / 2, y: sy - geo.top, width: geo.w, height: geo.h, class: 'sch-body'}, g);
+      const t = sEl('text', {x: sx - geo.w / 2, y: sy - geo.top - 0.8, class: 'sch-ref'}, g); t.textContent = ref;
+      const v = sEl('text', {x: sx - geo.w / 2, y: sy - geo.top + geo.h + 2.2, class: 'sch-val'}, g); v.textContent = M.parts[ref].value;
+      for (const [num, name, px, py, ang] of geo.pins) {
+        const x = sx + (mir ? -px : px), y = sy - py, inward = ((mir ? 180 - ang : ang) === 0) ? 1 : -1;
+        sEl('line', {x1: x, y1: y, x2: x + inward * 2.54, y2: y, class: 'sch-pin'}, g);
+        const n = sEl('text', {x: x + inward * 1.27, y: y - 0.4, class: 'sch-pnum', 'text-anchor': 'middle'}, g); n.textContent = num;
+        if (geo.pins.length > 2) { const nm = sEl('text', {x: x + inward * 3.1, y: y + 0.45, class: 'sch-pname', 'text-anchor': inward > 0 ? 'start' : 'end'}, g); nm.textContent = name; }
+        const pk = `${ref}.${num}`, pn = pinNet[pk];
+        const dot = sEl('circle', {cx: x, cy: y, r: 0.55, class: 'sch-end' + (pn && !A.wired.has(pk) && !POWER_NETS.has(pn.net) ? ' loose' : '') + (pn ? '' : ' unknown')}, g);
+        dot.dataset.pin = pk; sEl('title', {}, dot).textContent = `${pk} (${name}) · ${pn ? pn.net + ', ' + pn.conf : 'unknown net'}`;
+      }
+    }
+    lay.power.forEach(([net, x, y, d], j) => {
+      const g = sEl('g', {class: 'sch-power' + (schSel?.power === j ? ' sel' : '')}, svgS); g.dataset.power = j;
+      drawPower(g, net, x, y, d, 'sch-pwr', '#840000');
+    });
+    for (const a of A.autoPower) {
+      const g = sEl('g', {class: 'sch-auto'}, svgS), dx = PDIRS[a.e.out][0];
+      sEl('line', {x1: a.e.x, y1: a.e.y, x2: a.e.x + dx * 2.54, y2: a.e.y, class: 'sch-pwr', stroke: C[a.conf].color}, g);
+      drawPower(g, a.net, a.e.x + dx * 2.54, a.e.y, a.e.out, 'sch-pwr', '#840000');
+    }
+    if (schDraft) {
+      sEl('polyline', {points: schDraft.points.concat(schDraft.hover ? [schDraft.hover] : []).map(p => p.join(',')).join(' '), class: 'sch-draft'}, svgS);
+    }
+    // side panel: problems, loose pins
+    const box = $('#schedit-problems');
+    box.innerHTML = (A.problems.length ? `<b class="bad">${A.problems.length} problem(s): the build will refuse this layout</b><ul>` +
+      A.problems.map((p, i) => `<li>${esc(p.text)}${p.fix ? ` <button data-fix="${i}">Add ${esc(p.fix.pin)} to ${esc(p.fix.net)} as assumed</button>` : ''}</li>`).join('') + '</ul>'
+      : '<b class="good">No problems: the build will accept this layout.</b>') +
+      (A.loose.length ? `<p>Known but not wired (labelled in KiCad, orange rings): ${A.loose.map(esc).join(', ')}</p>` : '') +
+      `<p class="muted">${A.autoPower.length} power-net pin(s) get an automatic power symbol (shown faded).</p>`;
+    box.querySelectorAll('[data-fix]').forEach(b => b.onclick = () => {
+      const f = A.problems[+b.dataset.fix].fix;
+      mutate(() => setConnection(f.pin.split('.')[0], f.pin.split('.').slice(1).join('.'), f.net, 'assumed', 'Wired in the schematic editor; not verified.'));
+    });
+    schAnalysis = A;
+  }
+  let schAnalysis = null;
+  function editLayout(fn) {  // first edit copies the automatic layout into the annotations
+    mutate(a => { if (!a.schematic) a.schematic = autoLayout(); fn(a.schematic); });
+  }
+  function svgMM(ev) { const p = svgS.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY; const q = p.matrixTransform(svgS.getScreenCTM().inverse()); return [q.x, q.y]; }
+  function snapPoint([x, y]) {   // pin ends and wire ends within 1.3 mm win; else the grid
+    let best = null, bd = 1.3;
+    const lay = layoutNow();
+    for (const e of Object.values(pinEndsOf(lay))) { const d = Math.hypot(e.x - x, e.y - y); if (d < bd) { bd = d; best = [e.x, e.y]; } }
+    for (const w of lay.wires) for (const p of w) { const d = Math.hypot(p[0] - x, p[1] - y); if (d < bd) { bd = d; best = [r2(p[0]), r2(p[1])]; } }
+    return best || [snapG(x), snapG(y)];
+  }
+  function orthoTo(from, to) { return (from[0] === to[0] || from[1] === to[1]) ? [to] : [[to[0], from[1]], to]; }
+  function setSchTool(t) {
+    schTool = t; schDraft = null;
+    document.querySelectorAll('[data-stool]').forEach(b => b.classList.toggle('on', b.dataset.stool === t));
+    $('#power-opts').hidden = t !== 'power';
+    $('#schedit-hint').textContent = {select: 'Drag a part to move it (wires follow); click a wire or power symbol to select it; Delete removes it; M mirrors the selected part.',
+      wire: 'Click pins or points; corners are added automatically. Double-click or Enter ends the wire; Esc cancels. Ctrl+scroll zooms.',
+      power: 'Click a pin end or a wire end to place the power symbol.'}[t];
+    schRender();
+  }
+  document.querySelectorAll('[data-stool]').forEach(b => b.onclick = () => setSchTool(b.dataset.stool));
+  $('#power-net').innerHTML = D.schematic.powerNets.map(n => `<option>${esc(n)}</option>`).join('');
+  svgS.addEventListener('pointerdown', ev => {
+    if (schTool !== 'select') return;
+    const g = ev.target.closest('[data-ref]');
+    if (!g) return;
+    const ref = g.dataset.ref, lay = layoutNow();
+    schSel = {ref}; schDrag = {ref, start: svgMM(ev), base: clone(lay), moved: false};
+    svgS.setPointerCapture(ev.pointerId); ev.preventDefault(); schRender();
+  });
+  svgS.addEventListener('pointermove', ev => {
+    if (schDraft) { const p = snapPoint(svgMM(ev)); schDraft.hover = orthoTo(schDraft.points.at(-1), p).at(-1); schDraft.hoverPath = orthoTo(schDraft.points.at(-1), p); schRender(); return; }
+    if (!schDrag) return;
+    const [x, y] = svgMM(ev), dx = snapG(x - schDrag.start[0]), dy = snapG(y - schDrag.start[1]);
+    if (!schDrag.moved && !dx && !dy) return;
+    if (!schDrag.moved) { undoStack.push(JSON.stringify(ann)); if (!ann.schematic) ann.schematic = autoLayout(); schDrag.moved = true; }
+    ann.schematic = movePart(schDrag.base, schDrag.ref, dx, dy);
+    schRender();
+  });
+  svgS.addEventListener('pointerup', () => { if (schDrag) { const moved = schDrag.moved; schDrag = null; if (moved) commit(); } });
+  // Tidy wires after an edit: drop repeated points and back-and-forth spikes, then split a wire
+  // wherever another wire ends on its middle (as KiCad does for a T), so every joint is an end point.
+  function normalizeWires(lay) {
+    const same = (p, q) => p[0] === q[0] && p[1] === q[1];
+    let wires = lay.wires.map(w => {
+      let pts = w.map(p => [r2(p[0]), r2(p[1])]).filter((p, i, a) => i === 0 || !same(p, a[i - 1]));
+      for (let changed = true; changed;) {
+        changed = false;
+        for (let i = 1; i + 1 < pts.length; i++) {
+          const [a, b, c] = [pts[i - 1], pts[i], pts[i + 1]];
+          const colinear = (a[0] === b[0] && b[0] === c[0]) || (a[1] === b[1] && b[1] === c[1]);
+          const back = colinear && ((b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]) < 0);
+          if (back) { pts.splice(i, 1); pts = pts.filter((p, k, arr) => k === 0 || !same(p, arr[k - 1])); changed = true; break; }
+        }
+      }
+      return pts;
+    }).filter(w => w.length >= 2);
+    const ends = wires.flat();   // every vertex: the build treats each as a joint
+    wires = wires.map(w => {
+      const out = [w[0]];
+      for (let i = 1; i < w.length; i++) {
+        const a = w[i - 1], b = w[i];
+        const inner = ends.filter(p => !same(p, a) && !same(p, b) &&
+          ((a[0] === b[0] && p[0] === a[0] && Math.min(a[1], b[1]) < p[1] && p[1] < Math.max(a[1], b[1])) ||
+           (a[1] === b[1] && p[1] === a[1] && Math.min(a[0], b[0]) < p[0] && p[0] < Math.max(a[0], b[0]))));
+        inner.sort((p, q) => Math.hypot(p[0] - a[0], p[1] - a[1]) - Math.hypot(q[0] - a[0], q[1] - a[1]));
+        for (const p of inner) if (!same(p, out.at(-1))) out.push(p);
+        out.push(b);
+      }
+      return out;
+    });
+    lay.wires = wires;
+    return lay;
+  }
+  function movePart(base, ref, dx, dy) {
+    const lay = clone(base), before = pinEndsOf(base);
+    lay.parts[ref] = [r2(lay.parts[ref][0] + dx), r2(lay.parts[ref][1] + dy), lay.parts[ref][2]];
+    const after = pinEndsOf(lay), moved = {};
+    for (const [k, e] of Object.entries(before)) if (k.startsWith(ref + '.')) moved[`${e.x},${e.y}`] = [after[k].x, after[k].y];
+    lay.wires = lay.wires.map(w => {
+      const pts = w.map(p => moved[`${r2(p[0])},${r2(p[1])}`] || p), out = [pts[0]];
+      for (let i = 1; i < pts.length; i++) {
+        const a = out.at(-1), b = pts[i];
+        if (a[0] !== b[0] && a[1] !== b[1]) out.push(moved[`${r2(w[i][0])},${r2(w[i][1])}`] ? [a[0], b[1]] : [b[0], a[1]]);
+        out.push(b);
+      }
+      return out.filter((p, i, arr) => i === 0 || p[0] !== arr[i - 1][0] || p[1] !== arr[i - 1][1]);
+    });
+    lay.power = lay.power.map(([n, x, y, d]) => { const m = moved[`${r2(x)},${r2(y)}`]; return m ? [n, m[0], m[1], d] : [n, x, y, d]; });
+    return normalizeWires(lay);
+  }
+  svgS.addEventListener('click', ev => {
+    const p = snapPoint(svgMM(ev));
+    if (schTool === 'wire') {
+      if (!schDraft) schDraft = {points: [p]}; else schDraft.points.push(...orthoTo(schDraft.points.at(-1), p));
+      if (ev.detail >= 2) { finishWire(); return; }
+      schRender(); return;
+    }
+    if (schTool === 'power') {
+      const lay = layoutNow(), onEnd = Object.values(pinEndsOf(lay)).some(e => e.x === p[0] && e.y === p[1]) || lay.wires.some(w => w.some(q => r2(q[0]) === p[0] && r2(q[1]) === p[1]));
+      if (!onEnd) { $('#schedit-hint').textContent = 'Click exactly on a pin end or a wire end.'; return; }
+      editLayout(l => l.power.push([$('#power-net').value, p[0], p[1], $('#power-dir').value])); return;
+    }
+    const w = ev.target.dataset.wire, pw = ev.target.closest('[data-power]');
+    if (w !== undefined) schSel = {wire: +w}; else if (pw) schSel = {power: +pw.dataset.power}; else if (!ev.target.closest('[data-ref]')) schSel = null;
+    schRender();
+  });
+  function finishWire() {
+    if (!schDraft) return;
+    const pts = schDraft.points.filter((p, i, a) => i === 0 || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]);
+    schDraft = null;
+    if (pts.length >= 2) editLayout(l => { l.wires.push(pts); normalizeWires(l); }); else schRender();
+  }
+  function deleteSchSel() {
+    if (schSel?.wire !== undefined) { const i = schSel.wire; schSel = null; editLayout(l => l.wires.splice(i, 1)); }
+    else if (schSel?.power !== undefined) { const j = schSel.power; schSel = null; editLayout(l => l.power.splice(j, 1)); }
+  }
+  document.addEventListener('keydown', e => {
+    if ($('#schedit').hidden || /INPUT|SELECT|TEXTAREA/.test(document.activeElement.tagName)) return;
+    if (e.key === 'Escape') { schDraft = null; schRender(); }
+    else if (e.key === 'Enter') finishWire();
+    else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSchSel(); }
+    else if ((e.key === 'm' || e.key === 'M') && schSel?.ref) {
+      const ref = schSel.ref, base = layoutNow(), lay = movePart(base, ref, 0, 0);
+      lay.parts[ref][2] = !lay.parts[ref][2];
+      // pins swap sides: re-run the follow logic from the mirrored pin ends
+      const before = pinEndsOf(base), mirrored = clone(base); mirrored.parts[ref][2] = !base.parts[ref][2];
+      const after = pinEndsOf(mirrored), moved = {};
+      for (const [k, e2] of Object.entries(before)) if (k.startsWith(ref + '.')) moved[`${e2.x},${e2.y}`] = [after[k].x, after[k].y];
+      mutate(a => {
+        a.schematic = mirrored;
+        a.schematic.wires = base.wires.map(w => {
+          const pts = w.map(p => moved[`${r2(p[0])},${r2(p[1])}`] || p), out = [pts[0]];
+          for (let i = 1; i < pts.length; i++) { const a2 = out.at(-1), b = pts[i]; if (a2[0] !== b[0] && a2[1] !== b[1]) out.push([b[0], a2[1]]); out.push(b); }
+          return out;
+        });
+        a.schematic.power = base.power.map(([n, x, y, d]) => { const mv = moved[`${r2(x)},${r2(y)}`]; return mv ? [n, mv[0], mv[1], d] : [n, x, y, d]; });
+        normalizeWires(a.schematic);
+      });
+    }
+  });
+  svgS.parentElement.addEventListener('wheel', ev => {   // Ctrl/Cmd + scroll zooms around the pointer
+    if (!ev.ctrlKey && !ev.metaKey) return;
+    ev.preventDefault();
+    const box = svgS.parentElement, r = box.getBoundingClientRect();
+    const fx = (box.scrollLeft + ev.clientX - r.left) / box.scrollWidth, fy = (box.scrollTop + ev.clientY - r.top) / box.scrollHeight;
+    schZoom = Math.min(8, Math.max(0.6, schZoom * (ev.deltaY < 0 ? 1.15 : 1 / 1.15)));
+    schRender();
+    box.scrollLeft = fx * box.scrollWidth - (ev.clientX - r.left); box.scrollTop = fy * box.scrollHeight - (ev.clientY - r.top);
+  }, {passive: false});
+  $('#sch-delete').onclick = deleteSchSel;
+  $('#sch-reset').onclick = () => { if (confirm('Go back to the automatic layout from model.yaml?')) mutate(a => { delete a.schematic; }); };
+  $('#sch-undo').onclick = () => $('#undo').click();
+  $('#sch-export').onclick = () => {
+    if (schAnalysis.problems.length && !confirm(`${schAnalysis.problems.length} layout problem(s): the build will refuse this file. Export anyway?`)) return;
+    $('#export').click();
+  };
+  document.querySelectorAll('[data-schz]').forEach(b => b.onclick = () => { schZoom = Math.min(6, Math.max(0.6, schZoom * (+b.dataset.schz > 0 ? 1.4 : 1 / 1.4))); schRender(); });
+  document.querySelectorAll('[data-schview]').forEach(b => b.onclick = () => {
+    const edit = b.dataset.schview === 'edit';
+    document.querySelectorAll('[data-schview]').forEach(x => x.classList.toggle('on', x === b));
+    $('#schedit').hidden = !edit; $('#schkicad').hidden = edit;
+    if (edit) schRender();
+  });
+
   // test hooks (tests/ui-test.mjs)
   window.__editor = {
     exportText, importAnnotations,
+    sch: {analyse: () => { const A = analyseLayout(layoutNow()); return {problems: A.problems.map(p => p.text), loose: A.loose, wired: A.wired.size}; },
+      layout: () => clone(layoutNow()), toScreen: (x, y) => { const p = svgS.createSVGPoint(); p.x = x; p.y = y; const q = p.matrixTransform(svgS.getScreenCTM()); return {x: q.x, y: q.y}; },
+      pinEnd: k => pinEndsOf(layoutNow())[k], addWire: pts => editLayout(l => l.wires.push(pts))},
     nets: () => Object.fromEntries(Object.entries(M.nets).map(([n, net]) => [n, net.nodes.map(x => [x.ref, x.pin, x.conf]).sort()])),
     toScreen: (side, x, y) => { const svg = svgs[side], p = svg.createSVGPoint(); [p.x, p.y] = toView(side, x, y); const q = p.matrixTransform(svg.getScreenCTM()); return {x: q.x, y: q.y}; },
     state: () => clone(ann),

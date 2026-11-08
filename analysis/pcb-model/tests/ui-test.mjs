@@ -151,6 +151,54 @@ await E(text => window.__editor.importAnnotations(text), exported);
 check('import', (await E(() => window.__editor.state().traces.length)) === tracesBefore + 1);
 await E(() => localStorage.clear());
 
+// ---------------------------------------------------------------- schematic editor (clean state)
+await page.reload({ waitUntil: 'load' });
+await E(() => { document.querySelector('nav button[data-tab="schematic"]').click(); document.querySelector('[data-schview="edit"]').click(); });
+const s0 = await E(() => window.__editor.sch.analyse());
+const nParts = await E(() => document.querySelectorAll('#schedit-svg [data-ref]').length);
+check('schematic editor opens clean', nParts === 55 && s0.problems.length === 0, `${nParts} parts, ${s0.problems.length} problems, loose: ${s0.loose.join(',')}`);
+await page.screenshot({ path: 'shots/sch-edit.png' });
+
+// bring a sheet point into view in the zoomed editor before using the mouse there
+const focusSch = (x, y) => E(([x, y]) => { const box = document.querySelector('.schedit-canvas'), p = window.__editor.sch.toScreen(x, y), b = box.getBoundingClientRect();
+  box.scrollLeft += p.x - b.left - b.width / 2; box.scrollTop += p.y - b.top - b.height / 2; }, [x, y]);
+// drag U4 by 10.16 mm right and 5.08 mm down: its wires must follow and stay valid
+const su4 = await E(() => window.__editor.sch.layout().parts.U4);
+await focusSch(su4[0], su4[1]);
+const sfrom = await E(([x, y]) => window.__editor.sch.toScreen(x, y), su4);
+const sto = await E(([x, y]) => window.__editor.sch.toScreen(x + 10.16, y + 5.08), su4);
+await page.mouse.move(sfrom.x, sfrom.y); await page.mouse.down(); await page.mouse.move(sto.x, sto.y, { steps: 8 }); await page.mouse.up();
+const su4b = await E(() => window.__editor.sch.layout().parts.U4);
+const s1 = await E(() => window.__editor.sch.analyse());
+check('drag a part; wires follow', Math.abs(su4b[0] - su4[0] - 10.16) < 0.01 && Math.abs(su4b[1] - su4[1] - 5.08) < 0.01 && s1.problems.length === 0,
+  `${su4} -> ${su4b}; ${s1.problems.join(' | ')}`);
+await page.screenshot({ path: 'shots/sch-drag.png' });
+
+// draw a wire from C3.1 (net unknown) to J_DCN.1 (GND)
+await E(() => document.querySelector('[data-stool="wire"]').click());
+const sc3 = await E(() => window.__editor.sch.pinEnd('C3.1')), sdcn = await E(() => window.__editor.sch.pinEnd('J_DCN.1'));
+await focusSch(sc3.x, (sc3.y + sdcn.y) / 2);
+const sa1 = await E(([x, y]) => window.__editor.sch.toScreen(x, y), [sc3.x, sc3.y]), sb1 = await E(([x, y]) => window.__editor.sch.toScreen(x, y), [sdcn.x, sdcn.y]);
+await page.mouse.click(sa1.x, sa1.y); await page.mouse.click(sb1.x, sb1.y, { clickCount: 2 });
+const s2 = await E(() => window.__editor.sch.analyse());
+check('draw a wire; unknown pin and missing power symbol reported',
+  s2.problems.some(t => t.includes('C3.1') && t.includes('unknown')) && s2.problems.some(t => t.includes('needs a power symbol')), s2.problems.join(' | '));
+await E(() => document.querySelector('#schedit-problems [data-fix]')?.click());
+const nets3 = await E(() => window.__editor.nets());
+check('one-click fix adds the pin to the net as assumed', nets3.GND.some(n => n[0] === 'C3' && n[1] === '1' && n[2] === 'assumed'));
+await E(() => { document.querySelector('[data-stool="power"]').click(); });
+await page.select('#power-net', 'GND'); await page.select('#power-dir', 'L');
+await page.mouse.click(sb1.x, sb1.y);
+const s4 = await E(() => window.__editor.sch.analyse());
+check('place a power symbol; layout valid again', s4.problems.length === 0, s4.problems.join(' | '));
+await E(() => { const r = window.__editor.sch.pinEnd('U4.4'); const box = document.querySelector('.schedit-canvas'); const p = window.__editor.sch.toScreen(r.x, r.y); const b = box.getBoundingClientRect(); box.scrollLeft += p.x - b.left - 200; box.scrollTop += p.y - b.top - 150; });
+await page.screenshot({ path: 'shots/sch-wire.png' });
+const schExport = await E(() => window.__editor.exportText());
+fs.writeFileSync('shots/edit-schematic.json', schExport);
+fs.writeFileSync('shots/edit-schematic-nets.json', JSON.stringify(await E(() => window.__editor.nets())));
+check('export carries the layout', !!JSON.parse(schExport).schematic && JSON.parse(schExport).schematic.wires.length > 0);
+await E(() => localStorage.clear());
+
 check('no JS errors', errors.length === 0, errors.join(' | '));
 console.log(results.join('\n'));
 await browser.close();
